@@ -51,8 +51,8 @@ export class AgentProcess {
                     return;
                 }
                 last_restart = Date.now();
-                // random delay 3-10s before reconnect to look human-like
-                const reconnectDelay = 3000 + Math.random() * 7000;
+                // random delay 1-4s before reconnect to look human-like
+                const reconnectDelay = 1000 + Math.random() * 3000;
                 console.log(`Waiting ${(reconnectDelay/1000).toFixed(1)}s before reconnecting...`);
                 setTimeout(() => {
                     console.log('Restarting agent...');

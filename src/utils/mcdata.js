@@ -60,7 +60,7 @@ export function initBot(username) {
         port: settings.port,
         auth: settings.auth,
         version: version,
-        checkTimeoutInterval: 120000,  // 120s keep-alive check — gives Ollama time to generate
+        checkTimeoutInterval: 300000,  // 300s keep-alive check — gives Ollama time to generate
     }
     if (!version || version === "disabled") {
         delete options.version;

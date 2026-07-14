@@ -91,6 +91,7 @@ export class Agent extends EventEmitter {
         const onDisconnect = (event, reason) => {
             if (this._disconnectHandled) return;
             this._disconnectHandled = true;
+            if (this._keepAlive) clearInterval(this._keepAlive);
 
             // Log and Analyze
             // handleDisconnection handles logging to console and server
@@ -163,6 +164,20 @@ export class Agent extends EventEmitter {
 
                 await new Promise((resolve) => setTimeout(resolve, 10000));
                 this.checkAllPlayersPresent();
+
+                // Keep-alive: periodically send position to prevent server timeout
+                this._keepAlive = setInterval(() => {
+                    if (this.bot?.entity) {
+                        this.bot._client.write('position', {
+                            x: this.bot.entity.position.x,
+                            y: this.bot.entity.position.y,
+                            z: this.bot.entity.position.z,
+                            yaw: this.bot.entity.yaw,
+                            pitch: this.bot.entity.pitch,
+                            onGround: true
+                        });
+                    }
+                }, 45000);
 
             } catch (error) {
                 console.error('Error in spawn event:', error);
