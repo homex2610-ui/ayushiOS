@@ -60,9 +60,8 @@ export class Mistral {
             if (err.message.includes("A request containing images has been given to a model which does not have the 'vision' capability.")) {
                 result = "Vision is only supported by certain models.";
             } else {
-                result = "My brain disconnected, try again.";
+                throw err;
             }
-            console.log(err);
         }
 
         return result;

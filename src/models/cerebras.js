@@ -32,7 +32,7 @@ export class Cerebras {
             res = completion.choices?.[0]?.message?.content || '';
         } catch (err) {
             console.error('Cerebras API error:', err);
-            res = 'My brain disconnected, try again.';
+            throw err;
         }
         return res;
     }

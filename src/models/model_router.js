@@ -6,6 +6,7 @@ const PROVIDER_CONFIG = {
     deepseek:   { cooldownBase: 30, errorKeywords: ['429', 'rate limit', 'insufficient_quota'] },
     openai:     { cooldownBase: 30, errorKeywords: ['429', 'rate limit'] },
     anthropic:  { cooldownBase: 60, errorKeywords: ['429', 'rate limit', 'overloaded'] },
+    openrouter: { cooldownBase: 60, errorKeywords: ['402', 'credits', 'insufficient', 'max_tokens'] },
     ollama:     { cooldownBase: 10, errorKeywords: ['connection refused', 'econnrefused', 'fetch failed'] },
     huggingface:{ cooldownBase: 30, errorKeywords: ['429', 'rate limit'] },
 };

@@ -40,7 +40,7 @@ export class Ollama {
                     return await this.sendRequest(turns.slice(1), systemMessage);
                 } else {
                     console.log(err);
-                    res = 'My brain disconnected, try again.';
+                    throw err;
                 }
             }
 
@@ -63,7 +63,7 @@ export class Ollama {
 
         if (finalRes == null) {
             console.warn("Could not get a valid response after max attempts.");
-            finalRes = 'I thought too hard, sorry, try again.';
+            throw new Error('Ollama failed after max attempts');
         }
         return finalRes;
     }
