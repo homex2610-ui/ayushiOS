@@ -3,10 +3,10 @@
 
     "models": [
         "groq/llama-3.3-70b-versatile",
-        "ollama/qwen2.5-coder:1.5b",
         "openrouter/openai/gpt-4o-mini",
         "mistral/mistral-small-latest",
-        "cerebras/llama3.1-8b"
+        "cerebras/llama3.1-8b",
+        "ollama/qwen2.5-coder:1.5b"
     ],
     "embedding": "ollama/nomic-embed-text",
 
