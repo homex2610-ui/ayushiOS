@@ -3,8 +3,8 @@
 
     "models": [
         "groq/llama-3.3-70b-versatile",
-        "openrouter/openai/gpt-4o-mini",
         "ollama/qwen2.5:3b",
+        "openrouter/openai/gpt-4o-mini",
         "mistral/mistral-small-latest",
         "cerebras/llama3.1-8b"
     ],
