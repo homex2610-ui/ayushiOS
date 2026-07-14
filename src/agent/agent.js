@@ -320,6 +320,13 @@ export class Agent extends EventEmitter {
             return false;
         }
 
+        // Don't generate chat responses for internal system noise
+        const systemNoise = ['Agent process restarted', 'Your login session has been continued'];
+        if (source === 'system' && systemNoise.some(n => message.includes(n))) {
+            this.history.add(source, message);
+            return true;
+        }
+
         let used_command = false;
         if (max_responses === null) {
             max_responses = settings.max_commands === -1 ? Infinity : settings.max_commands;
@@ -513,6 +520,8 @@ export class Agent extends EventEmitter {
         message = (await handleTranslation(to_translate)).trim() + " " + remaining;
         // newlines are interpreted as separate chats, which triggers spam filters. replace them with spaces
         message = message.replaceAll('\n', ' ');
+        // strip markdown — Minecraft chat doesn't support **bold**, *italic*, ```code``` etc
+        message = message.replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1').replace(/```[\s\S]*?```/g, '').trim();
 
         if (settings.only_chat_with.length > 0) {
             for (let username of settings.only_chat_with) {

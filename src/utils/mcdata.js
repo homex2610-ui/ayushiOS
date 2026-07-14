@@ -90,7 +90,8 @@ export function initBot(username) {
             'logged in', 'login successful', 'successfully logged in',
             'you are now logged in', 'you registered', 'registered successfully',
             'authenticated', 'you are now authenticated',
-            'welcome to the server', 'welcome back'
+            'welcome to the server', 'welcome back',
+            'session has been continued', 'already logged in'
         ];
         if (successPatterns.some(p => msg.includes(p))) {
             authenticated = true;
