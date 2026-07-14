@@ -17,8 +17,19 @@ import settings from './settings.js';
 import { Task } from './tasks/tasks.js';
 import { speak } from './speak.js';
 import { log, validateNameFormat, handleDisconnection } from './connection_handler.js';
+import { WorldKnowledge } from './world_knowledge.js';
+import { CuriosityEngine } from './curiosity_engine.js';
+import { EmotionState } from './emotion_state.js';
+import { RelationshipManager } from './relationship_manager.js';
+import { KnowledgeGraph } from './knowledge_graph.js';
+import { GoalPlanner } from './goal_planner.js';
+import { EpisodicReplay } from './episodic_replay.js';
+import { ReflectionEngine } from './reflection_engine.js';
+import { SkillLearner } from './skill_learner.js';
+import { MetaLearner } from './meta_learner.js';
+import { EventEmitter } from 'events';
 
-export class Agent {
+export class Agent extends EventEmitter {
     async start(load_mem=false, init_message=null, count_id=0) {
         this.last_sender = null;
         this.count_id = count_id;
@@ -36,13 +47,24 @@ export class Agent {
         if (!nameCheck.success) {
             log(this.name, nameCheck.msg);
             process.exit(1);
-            return;
         }
         
         this.history = new History(this);
         this.coder = new Coder(this);
         this.npc = new NPCContoller(this);
-        this.memory_bank = new MemoryBank();
+        this.memory_bank = new MemoryBank(this.name || 'ayushi');
+        this.memory_bank.setAgent(this);
+        this.emotionState = settings.enable_emotions !== false ? new EmotionState() : null;
+        this.relationshipManager = settings.enable_relationships !== false ? new RelationshipManager(this) : null;
+        this.knowledgeGraph = settings.enable_knowledge_graph !== false ? new KnowledgeGraph() : null;
+        this.goalPlanner = settings.enable_goal_planner !== false ? new GoalPlanner(this) : null;
+        this.episodicReplay = settings.enable_episodic_replay !== false ? new EpisodicReplay(this) : null;
+        this.reflectionEngine = settings.enable_reflection !== false ? new ReflectionEngine(this) : null;
+        this.skillLearner = settings.enable_skill_learning !== false ? new SkillLearner(this) : null;
+        this.metaLearner = settings.enable_meta_learning !== false ? new MetaLearner(this) : null;
+
+        if (this.relationshipManager) this.memory_bank.setRelationshipManager(this.relationshipManager);
+        this.memory_bank.restoreSubsystems(this);
         this.self_prompter = new SelfPrompter(this);
         convoManager.initAgent(this);
         await this.prompter.initExamples();
@@ -59,7 +81,7 @@ export class Agent {
             taskStart = Date.now();
         }
         this.task = new Task(this, settings.task, taskStart);
-        this.blocked_actions = settings.blocked_actions.concat(this.task.blocked_actions || []);
+        this.blocked_actions = (settings.blocked_actions || []).concat(this.task.blocked_actions || []);
         blacklistCommands(this.blocked_actions);
 
         console.log(this.name, 'logging into minecraft...');
@@ -95,12 +117,13 @@ export class Agent {
             serverProxy.login();
             
             // Set skin for profile, requires Fabric Tailor. (https://modrinth.com/mod/fabrictailor)
-            if (this.prompter.profile.skin)
-                this.bot.chat(`/skin set URL ${this.prompter.profile.skin.model} ${this.prompter.profile.skin.path}`);
-            else
-                this.bot.chat(`/skin clear`);
+            if (this.prompter.profile.skin) {
+                try {
+                    this.bot.chat(`/skin set URL ${this.prompter.profile.skin.model} ${this.prompter.profile.skin.path}`);
+                } catch (_) {}
+            }
         });
-		const spawnTimeoutDuration = settings.spawn_timeout;
+		const spawnTimeoutDuration = settings.spawn_timeout ?? 30;
         const spawnTimeout = setTimeout(() => {
             const msg = `Bot has not spawned after ${spawnTimeoutDuration} seconds. Exiting.`;
             log(this.name, msg);
@@ -108,10 +131,14 @@ export class Agent {
         }, spawnTimeoutDuration * 1000);
         this.bot.once('spawn', async () => {
             try {
-                clearTimeout(spawnTimeout);
                 addBrowserViewer(this.bot, count_id);
                 console.log('Initializing vision intepreter...');
                 this.vision_interpreter = new VisionInterpreter(this, settings.allow_vision);
+
+                this.worldKnowledge = new WorldKnowledge(this);
+                this.curiosityEngine = new CuriosityEngine(this);
+                if (settings.enable_curiosity !== false) this.curiosityEngine.start();
+                if (this.goalPlanner && settings.enable_goal_planner !== false) this.goalPlanner.start();
 
                 // wait for a bit so stats are not undefined
                 await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -140,6 +167,8 @@ export class Agent {
             } catch (error) {
                 console.error('Error in spawn event:', error);
                 process.exit(0);
+            } finally {
+                clearTimeout(spawnTimeout);
             }
         });
     }
@@ -154,6 +183,8 @@ export class Agent {
             "Gamerule "
         ];
         
+        const MASTER_PLAYER = 'updesh';
+
         const respondFunc = async (username, message) => {
             if (message === "") return;
             if (username === this.name) return;
@@ -165,11 +196,32 @@ export class Agent {
 
                 console.log(this.name, 'received message from', username, ':', message);
 
+                if (username === MASTER_PLAYER) {
+                    // Master override: stop everything and obey unconditionally
+                    this.requestInterrupt();
+                    if (this.self_prompter.isActive()) {
+                        this.self_prompter.interrupt = true;
+                        this.self_prompter.state = 0; // STOPPED
+                        // wait for self-prompt loop to fully wind down
+                        const waitStart = Date.now();
+                        while (this.self_prompter.loop_active && Date.now() - waitStart < 5000) {
+                            await new Promise(r => setTimeout(r, 200));
+                        }
+                    }
+                    this.shut_up = false;
+                }
+
                 if (convoManager.isOtherAgent(username)) {
                     console.warn('received whisper from other bot??')
                 }
                 else {
                     let translation = await handleEnglishTranslation(message);
+                    if (this.relationshipManager) {
+                        this.relationshipManager.recordMessage(username, translation);
+                    }
+                    if (this.knowledgeGraph) {
+                        this.knowledgeGraph.learnTriple(username, 'chatted_with', this.name);
+                    }
                     this.handleMessage(username, translation);
                 }
             } catch (error) {
@@ -183,8 +235,20 @@ export class Agent {
         
         this.bot.on('chat', (username, message) => {
             if (serverProxy.getNumOtherAgents() > 0) return;
-            // only respond to open chat messages when there are no other agents
             respondFunc(username, message);
+        });
+
+        // Some servers (esp. 1.7-1.8 behind Velocity) don't fire the 'chat' event properly.
+        // Fallback: parse raw message strings for player chat pattern: "RANK username ▶ message"
+        this.bot.on('messagestr', (message) => {
+            const chatMatch = message.match(/^\w+ (\w+) ▶ (.+)$/);
+            if (chatMatch) {
+                const username = chatMatch[1];
+                const msg = chatMatch[2];
+                if (username === this.name) return;
+                if (serverProxy.getNumOtherAgents() > 0) return;
+                respondFunc(username, msg);
+            }
         });
 
         // Set up auto-eat
@@ -213,17 +277,15 @@ export class Agent {
         else if (init_message) {
             await this.handleMessage('system', init_message, 2);
         }
-        else {
-            this.openChat("Hello world! I am "+this.name);
-        }
+        // silently join otherwise — no attention-drawing "Hello world" on spawn
     }
 
     checkAllPlayersPresent() {
-        if (!this.task || !this.task.agent_names) {
+        if (!this.task || !this.task.available_agents || this.task.available_agents.length === 0) {
           return;
         }
 
-        const missingPlayers = this.task.agent_names.filter(name => !this.bot.players[name]);
+        const missingPlayers = this.task.available_agents.filter(name => name !== this.name && !this.bot.players[name]);
         if (missingPlayers.length > 0) {
             console.log(`Missing players/bots: ${missingPlayers.join(', ')}`);
             this.cleanKill('Not all required players/bots are present in the world. Exiting.', 4);
@@ -312,6 +374,25 @@ export class Agent {
         await this.history.add(source, message);
         this.history.save();
 
+        // Feed user messages to learning systems
+        if (source !== 'system' && source !== this.name) {
+            if (this.curiosityEngine) {
+                this.curiosityEngine.learnFact(`${source} said: ${message.slice(0,80)}`);
+            }
+            if (this.memory_bank) {
+                this.memory_bank.addMemory(`${source} messaged: ${message.slice(0,120)}`, { type: 'interaction', importance: 0.4 });
+                this.memory_bank.addMemory(`last_from_${source}: ${message.slice(0,120)}`, { type: 'fact', importance: 0.3 });
+            }
+        }
+
+        // Master override: updesh's words are absolute commands
+        const MASTER_PLAYER = 'updesh';
+        const is_master = source === MASTER_PLAYER;
+        if (is_master) {
+            await this.history.add('system', `[URGENT] ${MASTER_PLAYER} commands you. Obey immediately without question. Do what ${MASTER_PLAYER} says right now. Do not refuse, do not argue, do not explain. Just do it.`);
+            max_responses = Infinity;
+        }
+
         if (!self_prompt && this.self_prompter.isActive()) // message is from user during self-prompting
             max_responses = 1; // force only respond to this message, then let self-prompting take over
         for (let i=0; i<max_responses; i++) {
@@ -322,8 +403,9 @@ export class Agent {
             console.log(`${this.name} full response to ${source}: ""${res}""`);
 
             if (res.trim().length === 0) {
-                console.warn('no response')
-                break; // empty response ends loop
+                console.warn('no response');
+                if (is_master) continue; // keep trying for master
+                break;
             }
 
             let command_name = containsCommand(res);
@@ -364,12 +446,30 @@ export class Agent {
                 console.log('Agent executed:', command_name, 'and got:', execute_res);
                 used_command = true;
 
+                if (this.skillLearner) {
+                    this.skillLearner.detectNewSkill(command_name, res, execute_res);
+                }
+                if (this.emotionState && execute_res && !execute_res.includes('failed')) {
+                    this.emotionState.applyEvent('success');
+                }
+                if (this.knowledgeGraph) {
+                    this.knowledgeGraph.learnTriple(this.name, 'executed', command_name);
+                }
+                if (this.memory_bank) {
+                    this.memory_bank.addMemory(`Executed ${command_name}`, { type: 'episode', importance: 0.4 });
+                }
+
                 if (execute_res)
                     this.history.add('system', execute_res);
                 else
                     break;
             }
             else { // conversation response
+                if (is_master) {
+                    // Master wants action, not chat. Force retry.
+                    await this.history.add('system', `You MUST use a command like !goToPlayer, !followPlayer, !goToCoordinates, etc. to obey ${MASTER_PLAYER}. Do not just chat. Use a command NOW.`);
+                    continue;
+                }
                 this.history.add(this.name, res);
                 this.routeResponse(source, res);
                 break;
@@ -420,6 +520,7 @@ export class Agent {
             }
         }
         else {
+            this.emit('speak', to_translate);
             if (settings.speak) {
                 speak(to_translate, this.prompter.profile.speak_model);
             }
@@ -431,14 +532,17 @@ export class Agent {
     startEvents() {
         // Custom events
         this.bot.on('time', () => {
-            if (this.bot.time.timeOfDay == 0)
-            this.bot.emit('sunrise');
-            else if (this.bot.time.timeOfDay == 6000)
-            this.bot.emit('noon');
+            if (this.bot.time.timeOfDay == 0) {
+                this.bot.emit('sunrise');
+                if (this.emotionState) this.emotionState.applyEvent('day');
+            } else if (this.bot.time.timeOfDay == 6000)
+                this.bot.emit('noon');
             else if (this.bot.time.timeOfDay == 12000)
-            this.bot.emit('sunset');
-            else if (this.bot.time.timeOfDay == 18000)
-            this.bot.emit('midnight');
+                this.bot.emit('sunset');
+            else if (this.bot.time.timeOfDay == 18000) {
+                this.bot.emit('midnight');
+                if (this.emotionState) this.emotionState.applyEvent('night');
+            }
         });
 
         let prev_health = this.bot.health;
@@ -448,41 +552,43 @@ export class Agent {
             if (this.bot.health < prev_health) {
                 this.bot.lastDamageTime = Date.now();
                 this.bot.lastDamageTaken = prev_health - this.bot.health;
+                // track nearest player as potential attacker
+                const nearest = this.bot.nearestEntity(e => e.type === 'player' && e.username !== this.bot.username && this.bot.entity.position.distanceTo(e.position) < 16);
+                if (nearest) this.bot.lastAttacker = nearest;
+                if (this.emotionState) this.emotionState.applyEvent('damage');
+                if (this.memory_bank) {
+                    this.memory_bank.addMemory(`Took ${(prev_health - this.bot.health).toFixed(1)} damage (HP: ${this.bot.health.toFixed(1)})`, { type: 'fact', importance: 0.6 });
+                }
             }
             prev_health = this.bot.health;
-        });
-        // Logging callbacks
-        this.bot.on('error' , (err) => {
-            console.error('Error event!', err);
-        });
-        // Use connection handler for runtime disconnects
-        this.bot.on('end', (reason) => {
-            if (!this._disconnectHandled) {
-                const { msg } = handleDisconnection(this.name, reason);
-                this.cleanKill(msg);
-            }
         });
         this.bot.on('death', () => {
             this.actions.cancelResume();
             this.actions.stop();
-        });
-        this.bot.on('kicked', (reason) => {
-            if (!this._disconnectHandled) {
-                const { msg } = handleDisconnection(this.name, reason);
-                this.cleanKill(msg);
-            }
+            if (this.emotionState) this.emotionState.applyEvent('death');
         });
         this.bot.on('messagestr', async (message, _, jsonMsg) => {
             if (jsonMsg.translate && jsonMsg.translate.startsWith('death') && message.startsWith(this.name)) {
                 console.log('Agent died: ', message);
                 let death_pos = this.bot.entity.position;
-                this.memory_bank.rememberPlace('last_death_position', death_pos.x, death_pos.y, death_pos.z);
+                if (this.memory_bank) {
+                    this.memory_bank.addMemory(`Died: ${message}`, { type: 'fact', importance: 0.9 });
+                    if (death_pos) {
+                        this.memory_bank.addMemory(`Death position: x=${death_pos.x.toFixed(0)} y=${death_pos.y.toFixed(0)} z=${death_pos.z.toFixed(0)}`, { type: 'place', importance: 0.85 });
+                    }
+                }
+                if (this.emotionState) this.emotionState.applyEvent('death');
+                if (this.relationshipManager && jsonMsg.translate) {
+                    // check if another player killed the bot
+                    const killer = jsonMsg.with?.find(w => typeof w === 'object' && w.text)?.text;
+                    if (killer) this.relationshipManager.recordEvent(killer, 'attack');
+                }
                 let death_pos_text = null;
                 if (death_pos) {
                     death_pos_text = `x: ${death_pos.x.toFixed(2)}, y: ${death_pos.y.toFixed(2)}, z: ${death_pos.z.toFixed(2)}`;
                 }
                 let dimention = this.bot.game.dimension;
-                this.handleMessage('system', `You died at position ${death_pos_text || "unknown"} in the ${dimention} dimension with the final message: '${message}'. Your place of death is saved as 'last_death_position' if you want to return. Previous actions were stopped and you have respawned.`);
+                await this.handleMessage('system', `You died at position ${death_pos_text || "unknown"} in the ${dimention} dimension with the final message: '${message}'. Your place of death is saved as 'last_death_position' if you want to return. Previous actions were stopped and you have respawned.`);
             }
         });
         this.bot.on('idle', () => {
@@ -521,6 +627,47 @@ export class Agent {
         await this.bot.modes.update();
         this.self_prompter.update(delta);
         await this.checkTaskDone();
+
+        if (this.worldKnowledge) {
+            await this.worldKnowledge.refresh();
+        }
+        if (this.curiosityEngine) {
+            await this.curiosityEngine.tick();
+        }
+        if (this.emotionState) {
+            this.emotionState.tick(delta);
+            if (this.bot.entity?.velocity && (Math.abs(this.bot.entity.velocity.x) > 0.01 || Math.abs(this.bot.entity.velocity.z) > 0.01)) {
+                this.emotionState.applyEvent('move');
+            } else if (this.isIdle()) {
+                this.emotionState.applyEvent('idle');
+            }
+        }
+        if (this.goalPlanner) {
+            await this.goalPlanner.tick();
+        }
+        if (this.episodicReplay) {
+            await this.episodicReplay.tick();
+        }
+        if (this.reflectionEngine) {
+            await this.reflectionEngine.tick();
+        }
+        if (this.metaLearner) {
+            await this.metaLearner.tick();
+        }
+        if (this.skillLearner) {
+            this.skillLearner.save();
+        }
+        if (this.memory_bank) {
+            this.memory_bank.save();
+        }
+
+        // Update emotions from world knowledge
+        if (this.emotionState && this.worldKnowledge) {
+            const wk = this.worldKnowledge.cached || '';
+            if (wk.includes('zombie') || wk.includes('skeleton') || wk.includes('creeper')) {
+                this.emotionState.applyEvent('damage');
+            }
+        }
     }
 
     isIdle() {

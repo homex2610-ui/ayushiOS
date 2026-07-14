@@ -21,7 +21,7 @@ async function autoLight(bot) {
     return false;
 }
 
-async function equipHighestAttack(bot) {
+export async function equipHighestAttack(bot) {
     let weapons = bot.inventory.items().filter(item => item.name.includes('sword') || (item.name.includes('axe') && !item.name.includes('pickaxe')));
     if (weapons.length === 0)
         weapons = bot.inventory.items().filter(item => item.name.includes('pickaxe') || item.name.includes('shovel'));
@@ -2091,3 +2091,64 @@ export async function useToolOn(bot, toolName, targetName) {
     log(bot, `Used ${toolName} on ${block.name}.`);
     return true;
  }
+
+export async function jumpIntoBlock(bot, blockType, range = 128) {
+    /**
+     * Find and jump into a hole containing a specific block type (e.g., red_wool).
+     * Use when told to "jump into" something.
+     * @param {MinecraftBot} bot, reference to the minecraft bot.
+     * @param {string} blockType, the block type to jump into.
+     * @param {number} range, the range to look for the block. Defaults to 128.
+     * @returns {Promise<boolean>} true if the block was found and jumped into, false otherwise.
+     * @example
+     * await skills.jumpIntoBlock(bot, "red_wool");
+     **/
+    const block = world.getNearestBlock(bot, blockType, range);
+    if (!block) {
+        log(bot, `Could not find any ${blockType} within ${range} blocks.`);
+        return false;
+    }
+
+    const pos = block.position;
+    log(bot, `Found ${blockType} at ${pos}.`);
+
+    // Find surface Y above the block column
+    let surfaceY = pos.y;
+    for (let y = pos.y; y < 320; y++) {
+        const checkBlock = bot.blockAt(new Vec3(pos.x, y, pos.z));
+        if (!checkBlock || checkBlock.name === 'air' || checkBlock.name === 'cave_air') {
+            surfaceY = y;
+            break;
+        }
+    }
+
+    // Find solid ground adjacent to the hole at surface level
+    const offsets = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    let edgePos = null;
+    for (const [dx, dz] of offsets) {
+        const ground = bot.blockAt(new Vec3(pos.x + dx, surfaceY - 1, pos.z + dz));
+        if (ground && ground.name !== 'air' && ground.name !== 'cave_air') {
+            edgePos = new Vec3(pos.x + dx, surfaceY, pos.z + dz);
+            break;
+        }
+    }
+
+    if (edgePos) {
+        log(bot, `Going to edge of hole at ${edgePos}...`);
+        await goToPosition(bot, edgePos.x, edgePos.y, edgePos.z, 1);
+    } else {
+        log(bot, `Going to surface above ${blockType}...`);
+        await goToPosition(bot, pos.x, surfaceY, pos.z, 0.5);
+    }
+
+    // Walk forward into the hole
+    bot.setControlState("forward", true);
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    bot.setControlState("forward", false);
+
+    // Let the bot fall
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    log(bot, `Jumped into ${blockType}!`);
+    return true;
+}

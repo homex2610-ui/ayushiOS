@@ -9,6 +9,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { selectAPI, createModel } from './_model_map.js';
+import { ModelRouter } from './model_router.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +20,7 @@ export class Prompter {
         this.profile = profile;
         const defaults_dir = path.join(__dirname, '../../profiles/defaults');
         let default_profile = JSON.parse(readFileSync(path.join(defaults_dir, '_default.json'), 'utf8'));
-        let base_fp = '';
+        let base_fp;
         if (settings.base_profile.includes('survival')) {
             base_fp = path.join(defaults_dir, 'survival.json');
         } else if (settings.base_profile.includes('assistant')) {
@@ -28,6 +29,8 @@ export class Prompter {
             base_fp = path.join(defaults_dir, 'creative.json');
         } else if (settings.base_profile.includes('god_mode')) {
             base_fp = path.join(defaults_dir, 'god_mode.json');
+        } else {
+            throw new Error(`Unknown base_profile: "${settings.base_profile}". Must be one of: survival, assistant, creative, god_mode`);
         }
         let base_profile = JSON.parse(readFileSync(base_fp, 'utf8'));
 
@@ -56,8 +59,12 @@ export class Prompter {
         if (this.profile.max_tokens)
             max_tokens = this.profile.max_tokens;
 
-        let chat_model_profile = selectAPI(this.profile.model);
-        this.chat_model = createModel(chat_model_profile);
+        if (Array.isArray(this.profile.models)) {
+            this.chat_model = new ModelRouter(this.profile.models);
+        } else {
+            let chat_model_profile = selectAPI(this.profile.model);
+            this.chat_model = createModel(chat_model_profile);
+        }
 
         if (this.profile.code_model) {
             let code_model_profile = selectAPI(this.profile.code_model);
@@ -93,12 +100,11 @@ export class Prompter {
 
         this.skill_libary = new SkillLibrary(agent, this.embedding_model);
         mkdirSync(`./bots/${name}`, { recursive: true });
-        writeFileSync(`./bots/${name}/last_profile.json`, JSON.stringify(this.profile, null, 4), (err) => {
-            if (err) {
-                throw new Error('Failed to save profile:', err);
-            }
-            console.log("Copy profile saved.");
-        });
+        try {
+            writeFileSync(`./bots/${name}/last_profile.json`, JSON.stringify(this.profile, null, 4));
+        } catch (err) {
+            console.error('Failed to save profile:', err.message);
+        }
     }
 
     getName() {
@@ -166,6 +172,20 @@ export class Prompter {
             prompt = prompt.replaceAll('$EXAMPLES', await examples.createExampleMessage(messages));
         if (prompt.includes('$MEMORY'))
             prompt = prompt.replaceAll('$MEMORY', this.agent.history.memory);
+        if (prompt.includes('$WORLD_AWARE') && this.agent.worldKnowledge)
+            prompt = prompt.replaceAll('$WORLD_AWARE', this.agent.worldKnowledge.getSummary());
+        if (prompt.includes('$MEMORY_SUMMARY') && this.agent.memory_bank)
+            prompt = prompt.replaceAll('$MEMORY_SUMMARY', this.agent.memory_bank.getLongTermSummary());
+        if (prompt.includes('$EMOTIONS') && this.agent.emotionState)
+            prompt = prompt.replaceAll('$EMOTIONS', this.agent.emotionState.getDescription());
+        if (prompt.includes('$RELATIONSHIPS') && this.agent.relationshipManager)
+            prompt = prompt.replaceAll('$RELATIONSHIPS', this.agent.relationshipManager.getSummary());
+        if (prompt.includes('$GRAPH') && this.agent.knowledgeGraph)
+            prompt = prompt.replaceAll('$GRAPH', this.agent.knowledgeGraph.getSummary());
+        if (prompt.includes('$META_LESSONS'))
+            prompt = prompt.replaceAll('$META_LESSONS', this.agent.metaLearner ? this.agent.metaLearner.getLessons() : '');
+        if (prompt.includes('$CUSTOM_SKILLS'))
+            prompt = prompt.replaceAll('$CUSTOM_SKILLS', this.agent.skillLearner ? this.agent.skillLearner.getSkillDocs() : '');
         if (prompt.includes('$TO_SUMMARIZE'))
             prompt = prompt.replaceAll('$TO_SUMMARIZE', stringifyTurns(to_summarize));
         if (prompt.includes('$CONVO'))
@@ -339,7 +359,7 @@ export class Prompter {
             return;
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         let logEntry;
-        let task_id = this.agent.task.task_id;
+        let task_id = this.agent.task.data?.task_id;
         if (task_id == null) {
             logEntry = `[${timestamp}] \nPrompt:\n${prompt}\n\nConversation:\n${JSON.stringify(messages, null, 2)}\n\nResponse:\n${generation}\n\n`;
         } else {
@@ -350,7 +370,7 @@ export class Prompter {
     }
 
     async _saveToFile(logFile, logEntry) {
-        let task_id = this.agent.task.task_id;
+        let task_id = this.agent.task.data?.task_id;
         let logDir;
         if (task_id == null) {
             logDir = path.join(__dirname, `../../bots/${this.agent.name}/logs`);

@@ -215,8 +215,10 @@ export function createMindServer(host_public = false, port = 8080) {
         });
 
         socket.on('restart-agent', (agentName) => {
-            console.log(`Restarting agent: ${agentName}`);
-            agent_connections[agentName].socket.emit('restart-agent');
+            const agent = agent_connections[agentName];
+            if (agent && agent.socket) {
+                agent.socket.emit('restart-agent');
+            }
         });
 
         socket.on('stop-agent', (agentName) => {
@@ -273,6 +275,7 @@ export function createMindServer(host_public = false, port = 8080) {
 
         socket.on('listen-to-agents', () => {
             addListener(socket);
+            socket.on('disconnect', () => removeListener(socket));
         });
     });
 
@@ -313,7 +316,7 @@ function addListener(listener_socket) {
             const states = {};
             for (let agentName in agent_connections) {
                 let agent = agent_connections[agentName];
-                if (agent.in_game) {
+                if (agent.in_game && agent.socket) {
                     try {
                         const state = await new Promise((resolve) => {
                             agent.socket.emit('get-full-state', (s) => resolve(s));

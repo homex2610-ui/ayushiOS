@@ -9,7 +9,7 @@ export class SelfPrompter {
         this.interrupt = false;
         this.prompt = '';
         this.idle_time = 0;
-        this.cooldown = 2000;
+        this.cooldown = 30000;
     }
 
     start(prompt) {
@@ -63,14 +63,13 @@ export class SelfPrompter {
         let no_command_count = 0;
         const MAX_NO_COMMAND = 3;
         while (!this.interrupt) {
-            const msg = `You are self-prompting with the goal: '${this.prompt}'. Your next response MUST contain a command with this syntax: !commandName. Respond:`;
+            const msg = `Your goal: ${this.prompt}. Do what it takes.`;
             
             let used_command = await this.agent.handleMessage('system', msg, -1);
             if (!used_command) {
                 no_command_count++;
                 if (no_command_count >= MAX_NO_COMMAND) {
                     let out = `Agent did not use command in the last ${MAX_NO_COMMAND} auto-prompts. Stopping auto-prompting.`;
-                    this.agent.openChat(out);
                     console.warn(out);
                     this.state = STOPPED;
                     break;
@@ -132,8 +131,18 @@ export class SelfPrompter {
         this.state = PAUSED;
     }
 
+    pushGoal(goal) {
+        if (!goal) return;
+        this.prompt = goal;
+        if (this.state !== ACTIVE) {
+            this.state = ACTIVE;
+            this.startLoop();
+        }
+        console.log(`Self-prompt goal set to: "${goal}"`);
+    }
+
     shouldInterrupt(is_self_prompt) { // to be called from handleMessage
-        return is_self_prompt && (this.state === ACTIVE || this.state === PAUSED) && this.interrupt;
+        return is_self_prompt && this.interrupt;
     }
 
     handleUserPromptedCmd(is_self_prompt, is_action) {

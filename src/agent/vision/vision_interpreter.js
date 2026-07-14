@@ -1,13 +1,20 @@
 import { Vec3 } from 'vec3';
-import { Camera } from "./camera.js";
 import fs from 'fs';
+
+let Camera = null;
+try {
+  const camMod = await import("./camera.js");
+  Camera = camMod.Camera;
+} catch (e) {
+  console.warn('Vision disabled (camera module not available):', e.message.slice(0,80));
+}
 
 export class VisionInterpreter {
     constructor(agent, allow_vision) {
         this.agent = agent;
-        this.allow_vision = allow_vision;
+        this.allow_vision = allow_vision && Camera !== null;
         this.fp = './bots/'+agent.name+'/screenshots/';
-        if (allow_vision) {
+        if (this.allow_vision) {
             this.camera = new Camera(agent.bot, this.fp);
         }
     }

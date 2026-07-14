@@ -64,9 +64,8 @@ export class GroqCloudAPI {
             if (err.message.includes("content must be a string")) {
                 res = "Vision is only supported by certain models.";
             } else {
-                res = "My brain disconnected, try again.";
+                throw err;
             }
-            console.log(err);
         }
         return res;
     }

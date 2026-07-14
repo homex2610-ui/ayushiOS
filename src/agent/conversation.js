@@ -65,10 +65,10 @@ class ConversationManager {
         clearInterval(this.connection_monitor);
         let wait_time = 0;
         let last_time = Date.now();
-        this.connection_monitor = setInterval(() => {
+        this.connection_monitor = setInterval(async () => {
             if (!this.activeConversation) {
                 this._stopMonitor();
-                return; // will clean itself up
+                return;
             }
 
             let delta = Date.now() - last_time;
@@ -78,7 +78,7 @@ class ConversationManager {
             if (this.awaiting_response && agent.isIdle()) {
                 wait_time += delta;
                 if (wait_time > this.wait_time_limit) {
-                    agent.handleMessage('system', `${convo_partner} hasn't responded in ${this.wait_time_limit/1000} seconds, respond with a message to them or your own action.`);
+                    await agent.handleMessage('system', `${convo_partner} hasn't responded in ${this.wait_time_limit/1000} seconds, respond with a message to them or your own action.`);
                     wait_time = 0;
                     this.wait_time_limit*=2;
                 }
@@ -89,14 +89,14 @@ class ConversationManager {
             }
 
             if (!this.otherAgentInGame(convo_partner) && !this.connection_timeout) {
-                this.connection_timeout = setTimeout(() => {
+                this.connection_timeout = setTimeout(async () => {
                     if (this.otherAgentInGame(convo_partner)){
                         this._clearMonitorTimeouts();
                         return;
                     }
                     if (!agent.self_prompter.isPaused()) {
                         this.endConversation(convo_partner);
-                        agent.handleMessage('system', `${convo_partner} disconnected, conversation has ended.`);
+                        await agent.handleMessage('system', `${convo_partner} disconnected, conversation has ended.`);
                     }
                     else {
                         this.endConversation(convo_partner);
@@ -275,7 +275,7 @@ async function _scheduleProcessInMessage(sender, received, convo) {
         clearTimeout(convo.inMessageTimer);
     let otherAgentBusy = containsCommand(received.message);
 
-    const scheduleResponse = (delay) => convo.inMessageTimer = setTimeout(() => _processInMessageQueue(sender), delay);
+    const scheduleResponse = (delay) => convo.inMessageTimer = setTimeout(async () => { try { await _processInMessageQueue(sender); } catch (e) { console.error('Error processing message queue:', e); } }, delay);
 
     if (!agent.isIdle() && otherAgentBusy) {
         // both are busy
@@ -306,9 +306,9 @@ async function _scheduleProcessInMessage(sender, received, convo) {
     }
 }
 
-function _processInMessageQueue(name) {
+async function _processInMessageQueue(name) {
     const convo = convoManager._getConvo(name);
-    _handleFullInMessage(name, _compileInMessages(convo));
+    await _handleFullInMessage(name, _compileInMessages(convo));
 }
 
 function _compileInMessages(convo) {
@@ -322,7 +322,7 @@ function _compileInMessages(convo) {
     return pack;
 }
 
-function _handleFullInMessage(sender, received) {
+async function _handleFullInMessage(sender, received) {
     console.log(`${agent.name} responding to "${received.message}" from ${sender}`);
     
     const convo = convoManager._getConvo(sender);
@@ -332,12 +332,12 @@ function _handleFullInMessage(sender, received) {
     if (received.end) {
         convoManager.endConversation(sender);
         message = `Conversation with ${sender} ended with message: "${message}"`;
-        sender = 'system'; // bot will respond to system instead of the other bot
+        sender = 'system';
     }
     else if (received.start)
         agent.shut_up = false;
     convo.inMessageTimer = null;
-    agent.handleMessage(sender, message);
+    await agent.handleMessage(sender, message);
 }
 
 

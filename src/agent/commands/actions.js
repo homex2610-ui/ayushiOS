@@ -124,6 +124,17 @@ export const actionsList = [
         })
     },
     {
+        name: '!jumpIntoBlock',
+        description: 'Find and jump into a hole containing a specific block (e.g., red_wool). Use when told to "jump into" something.',
+        params: {
+            'block_type': { type: 'BlockName', description: 'The block type to find and jump into.' },
+            'search_range': { type: 'float', description: 'The range to search for the block (default 128).', domain: [10, 512] }
+        },
+        perform: runAsAction(async (agent, block_type, search_range) => {
+            await skills.jumpIntoBlock(agent.bot, block_type, search_range || 128);
+        })
+    },
+    {
         name: '!searchForBlock',
         description: 'Find and go to the nearest block of a given type in a given range.',
         params: {
@@ -163,7 +174,9 @@ export const actionsList = [
         params: {'name': { type: 'string', description: 'The name to remember the location as.' }},
         perform: async function (agent, name) {
             const pos = agent.bot.entity.position;
-            agent.memory_bank.rememberPlace(name, pos.x, pos.y, pos.z);
+            if (agent.memory_bank) {
+                agent.memory_bank.addMemory(`Location ${name}: ${Math.round(pos.x)}, ${Math.round(pos.y)}, ${Math.round(pos.z)}`, { type: 'place', importance: 0.7 });
+            }
             return `Location saved as "${name}".`;
         }
     },

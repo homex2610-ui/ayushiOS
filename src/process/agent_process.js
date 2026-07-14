@@ -10,11 +10,11 @@ export class AgentProcess {
         this.port = port;
     }
 
-    start(load_memory=false, init_message=null, count_id=0) {
+    start(load_memory=false, init_message=null, count_id=0, serverSettings={}) {
         this.count_id = count_id;
         this.running = true;
 
-        let args = [init_agent_path, this.name];
+        let args = ['--experimental-require-module', init_agent_path, this.name];
         args.push('-n', this.name);
         args.push('-c', count_id);
         if (load_memory)
@@ -22,6 +22,11 @@ export class AgentProcess {
         if (init_message)
             args.push('-m', init_message);
         args.push('-p', this.port);
+
+        // Pass server overrides via env to the child process
+        if (Object.keys(serverSettings).length > 0) {
+            process.env.MINDCRAFT_SERVER = JSON.stringify(serverSettings);
+        }
 
         const agentProcess = spawn(process.execPath, args, {
             stdio: 'inherit',
@@ -45,9 +50,14 @@ export class AgentProcess {
                     console.error(`Agent process exited too quickly and will not be restarted.`);
                     return;
                 }
-                console.log('Restarting agent...');
-                this.start(true, 'Agent process restarted.', count_id, this.port);
                 last_restart = Date.now();
+                // random delay 3-10s before reconnect to look human-like
+                const reconnectDelay = 3000 + Math.random() * 7000;
+                console.log(`Waiting ${(reconnectDelay/1000).toFixed(1)}s before reconnecting...`);
+                setTimeout(() => {
+                    console.log('Restarting agent...');
+                    this.start(true, 'Agent process restarted.', count_id);
+                }, reconnectDelay);
             }
         });
     

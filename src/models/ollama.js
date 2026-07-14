@@ -7,7 +7,7 @@ export class Ollama {
         this.params = params;
         this.url = url || 'http://127.0.0.1:11434';
         this.chat_endpoint = '/api/chat';
-        this.embedding_endpoint = '/api/embeddings';
+        this.embedding_endpoint = '/api/embed';
     }
 
     async sendRequest(turns, systemMessage) {
@@ -32,7 +32,7 @@ export class Ollama {
                 if (apiResponse) {
                     res = apiResponse['message']['content'];
                 } else {
-                    res = 'No response data.';
+                    throw new Error('Ollama returned no response. Is the server running?');
                 }
             } catch (err) {
                 if (err.message.toLowerCase().includes('context length') && turns.length > 1) {
@@ -69,10 +69,26 @@ export class Ollama {
     }
 
     async embed(text) {
-        let model = this.model_name || 'embeddinggemma';
-        let body = { model: model, input: text };
-        let res = await this.send(this.embedding_endpoint, body);
-        return res['embedding'];
+        const model = this.model_name || 'nomic-embed-text';
+
+        const body = {
+            model,
+            input: text
+        };
+
+        const res = await this.send(this.embedding_endpoint, body);
+
+        // Ollama >= 0.31 returns "embeddings"
+        if (res?.embeddings?.length) {
+            return res.embeddings[0];
+        }
+
+        // Older Ollama versions return "embedding"
+        if (res?.embedding) {
+            return res.embedding;
+        }
+
+        throw new Error("Embedding API returned no embedding.");
     }
 
     async send(endpoint, body) {
@@ -109,7 +125,7 @@ export class Ollama {
                 }
             ]
         });
-        
+
         return this.sendRequest(imageMessages, systemMessage);
     }
 }

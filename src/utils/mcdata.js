@@ -8,7 +8,7 @@ import { plugin as collectblock } from 'mineflayer-collectblock';
 import { plugin as autoEat } from 'mineflayer-auto-eat';
 import plugin from 'mineflayer-armor-manager';
 const armorManager = plugin;
-let mc_version = settings.minecraft_version;
+let mc_version = "1.21.8"; // fallback only; overridden by settings at runtime
 let mcdata = null;
 let Item = null;
 
@@ -53,38 +53,116 @@ export const WOOL_COLORS = [
 
 
 export function initBot(username) {
+    const version = settings.minecraft_version || mc_version;
     const options = {
         username: username,
         host: settings.host,
         port: settings.port,
         auth: settings.auth,
-        version: mc_version,
-        checkTimeoutInterval: 60000,  // 60s keep-alive check (default 30s) — reduces disconnects on slow servers
+        version: version,
+        checkTimeoutInterval: 120000,  // 120s keep-alive check — gives Ollama time to generate
     }
-    if (!mc_version || mc_version === "auto") {
+    if (!version || version === "disabled") {
         delete options.version;
     }
 
     const bot = createBot(options);
 
-    // Throttle position packets to avoid kicks on Paper/Spigot servers
-    // Paper enforces stricter packet rate limits than vanilla, causing ECONNRESET
-    // when mineflayer sends position updates faster than 50ms apart
+    // --- AUTOMATIC AUTHENTICATION WITH ANTI-SPAM COOLDOWN ---
+    // Supports AuthMe, CrazyLogin, and other auth plugins
+    // NOTE: We do NOT set authenticated = true on mineflayer's 'login' event,
+    // because AuthMe prompts happen AFTER the protocol login. Setting it early
+    // would skip the register/login commands and get the bot kicked.
+    let lastAuthAttempt = 0;
+    let authenticated = false;
+    bot.on('message', (jsonMsg) => {
+        console.log('[SERVER MSG]', jsonMsg.toString());
+        const now = Date.now();
+        if (authenticated) return;
+        // If we tried to authenticate less than 5 seconds ago, ignore the prompt to prevent spam kicks!
+        if (now - lastAuthAttempt < 5000) return; 
+
+        const msg = jsonMsg.toString().toLowerCase();
+        const password = settings.password || 'indr@2610';
+
+        // Success patterns — these indicate AuthMe has accepted the login/register
+        const successPatterns = [
+            'logged in', 'login successful', 'successfully logged in',
+            'you are now logged in', 'you registered', 'registered successfully',
+            'authenticated', 'you are now authenticated',
+            'welcome to the server', 'welcome back'
+        ];
+        if (successPatterns.some(p => msg.includes(p))) {
+            authenticated = true;
+            console.log('[Auth] Authentication confirmed.');
+            return;
+        }
+
+        const registerPatterns = [
+            '/register', 'please register', 'use the command /register',
+            'not registered', 'you are not registered', 'this server requires registration',
+            'need to register', 'account is not activated', 'register your account',
+            'type /register', 'use /register', 'please input your password to register',
+            'new account', 'account created', 'you need to register',
+            'account does not exist', 'please choose a password', 'register an account',
+            'this account is not registered'
+        ];
+        const loginPatterns = [
+            '/login', 'please login', 'use the command /login',
+            'you need to login', 'type /login', 'use /login',
+            'session expired', 'please reconnect', 'please input your password',
+            'you are not logged in', 'login first', 'please authenticate',
+            'your session has expired', 'account is already connected',
+            'login to the server', 'please type your password'
+        ];
+
+        if (registerPatterns.some(p => msg.includes(p))) {
+            lastAuthAttempt = now;
+            bot.chat(`/register ${password} ${password}`);
+            // wait 3 seconds then try /login in case the account already exists
+            setTimeout(() => {
+                if (!authenticated && Date.now() - lastAuthAttempt >= 5000) {
+                    bot.chat(`/login ${password}`);
+                    console.log('[Auth] Register may have failed, trying /login instead...');
+                }
+            }, 3000);
+            console.log('[Auth] Detected registration prompt. Sent /register command...');
+        } else if (loginPatterns.some(p => msg.includes(p))) {
+            lastAuthAttempt = now;
+            bot.chat(`/login ${password}`);
+            console.log('[Auth] Detected login prompt. Sent /login command...');
+        }
+    });
+
+    // Fallback: if still not authenticated 8s after spawn, try /login
+    bot.once('spawn', () => {
+        setTimeout(() => {
+            if (!authenticated) {
+                const password = settings.password || 'indr@2610';
+                bot.chat(`/login ${password}`);
+                console.log('[Auth] Not authenticated after spawn — sending /login fallback.');
+            }
+        }, 8000);
+    });
+    // --------------------------------------------------------
+    // Paper/Spigot servers enforce packet rate limits; randomized timing looks more human
     let lastPositionUpdate = 0;
     let pendingPositionPacket = null;
-    const POSITION_THROTTLE_MS = 50;
+    const POSITION_THROTTLE_BASE = 50;
+    const POSITION_THROTTLE_JITTER = 30;
     const originalWrite = bot._client.write.bind(bot._client);
     bot._client.write = function(name, data) {
         if (name === 'position' || name === 'position_look' || name === 'look') {
             const now = Date.now();
-            if (now - lastPositionUpdate < POSITION_THROTTLE_MS) {
-                // Queue this packet so the last position update is never lost
+            const throttleMs = POSITION_THROTTLE_BASE + Math.random() * POSITION_THROTTLE_JITTER;
+            if (now - lastPositionUpdate < throttleMs) {
                 if (!pendingPositionPacket) {
+                    const delay = throttleMs - (now - lastPositionUpdate) + Math.random() * 10;
                     pendingPositionPacket = setTimeout(() => {
                         pendingPositionPacket = null;
                         lastPositionUpdate = Date.now();
                         originalWrite(name, data);
-                    }, POSITION_THROTTLE_MS - (now - lastPositionUpdate));
+                    }, delay);
                 }
                 return;
             }
@@ -367,8 +445,7 @@ export function makeItem(name, amount=1) {
 
 /**
  * Returns the number of ingredients required to use the recipe once.
- * 
- * @param {Recipe} recipe
+ * * @param {Recipe} recipe
  * @returns {Object<mc.ItemName, number>} an object describing the number of each ingredient.
  */
 export function ingredientsFromPrismarineRecipe(recipe) {

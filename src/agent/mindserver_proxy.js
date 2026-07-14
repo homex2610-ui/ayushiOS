@@ -3,9 +3,6 @@ import convoManager from './conversation.js';
 import { setSettings } from './settings.js';
 import { getFullState } from './library/full_state.js';
 
-// agent's individual connection to the mindserver
-// always connect to localhost
-
 class MindServerProxy {
     constructor() {
         if (MindServerProxy.instance) {
@@ -52,18 +49,21 @@ class MindServerProxy {
             convoManager.updateAgents(agents);
             if (this.agent?.task) {
                 console.log(this.agent.name, 'updating available agents');
-                this.agent.task.updateAvailableAgents(agents);
+                this.agent.task.updateAvailableAgents(agents.map(a => typeof a === 'object' ? a.name : a));
             }
         });
 
-        this.socket.on('restart-agent', (agentName) => {
-            console.log(`Restarting agent: ${agentName}`);
-            this.agent.cleanKill();
+        this.socket.on('restart-agent', () => {
+            if (this.agent) {
+                this.agent.cleanKill();
+            }
         });
 		
         this.socket.on('send-message', (data) => {
             try {
-                this.agent.respondFunc(data.from, data.message);
+                if (this.agent) {
+                    this.agent.respondFunc(data.from, data.message);
+                }
             } catch (error) {
                 console.error('Error: ', JSON.stringify(error, Object.getOwnPropertyNames(error)));
             }
@@ -79,13 +79,20 @@ class MindServerProxy {
             }
         });
 
-        // Request settings and wait for response
+        // Request settings with disconnect handling
         await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Settings request timed out after 5 seconds'));
             }, 5000);
 
+            const onDisconnect = () => {
+                clearTimeout(timeout);
+                reject(new Error('Disconnected while waiting for settings'));
+            };
+            this.socket.on('disconnect', onDisconnect);
+
             this.socket.emit('get-settings', name, (response) => {
+                this.socket.off('disconnect', onDisconnect);
                 clearTimeout(timeout);
                 if (response.error) {
                     return reject(new Error(response.error));
@@ -122,15 +129,16 @@ class MindServerProxy {
     }
 }
 
-// Create and export a singleton instance
-export const serverProxy = new MindServerProxy();
+const serverProxy = new MindServerProxy();
 
-// for chatting with other bots
 export function sendBotChatToServer(agentName, json) {
-    serverProxy.getSocket().emit('chat-message', agentName, json);
+    const sock = serverProxy.getSocket();
+    if (sock) sock.emit('chat-message', agentName, json);
 }
 
-// for sending general output to server for display
 export function sendOutputToServer(agentName, message) {
-    serverProxy.getSocket().emit('bot-output', agentName, message);
+    const sock = serverProxy.getSocket();
+    if (sock) sock.emit('bot-output', agentName, message);
 }
+
+export { serverProxy };

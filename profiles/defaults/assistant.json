@@ -4,10 +4,13 @@
         "unstuck": true,
         "cowardice": false,
         "self_defense": true,
+        "pvp": true,
         "hunting": false,
         "item_collecting": true,
         "torch_placing": true,
         "elbow_room": true,
+        "walking_gaze": true,
+        "fidget": true,
         "idle_staring": true,
         "cheat": false
     }

@@ -1,5 +1,6 @@
 import { Agent } from '../agent/agent.js';
 import { serverProxy } from '../agent/mindserver_proxy.js';
+import settings from '../agent/settings.js';
 import yargs from 'yargs';
 
 const args = process.argv.slice(2);
@@ -37,13 +38,28 @@ const argv = yargs(args)
     })
     .argv;
 
+// Apply server overrides from parent process
+try {
+    const serverEnv = process.env.MINDCRAFT_SERVER;
+    if (serverEnv) {
+        const overrides = JSON.parse(serverEnv);
+        if (overrides.host) settings.host = overrides.host;
+        if (overrides.port != null) settings.port = overrides.port;
+        if (overrides.auth) settings.auth = overrides.auth;
+        if (overrides.minecraft_version) settings.minecraft_version = overrides.minecraft_version;
+        if (overrides.password) settings.password = overrides.password;
+    }
+} catch (e) {
+    console.warn('Failed to parse MINDCRAFT_SERVER env:', e.message);
+}
+
 (async () => {
     try {
+        const agent = new Agent();
+        serverProxy.setAgent(agent);
         console.log('Connecting to MindServer');
         await serverProxy.connect(argv.name, argv.port);
         console.log('Starting agent');
-        const agent = new Agent();
-        serverProxy.setAgent(agent);
         await agent.start(argv.load_memory, argv.init_message, argv.count_id);
     } catch (error) {
         console.error('Failed to start agent process:');

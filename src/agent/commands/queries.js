@@ -223,7 +223,8 @@ export const queryList = [
         name: '!savedPlaces',
         description: 'List all saved locations.',
         perform: async function (agent) {
-            return "Saved place names: " + agent.memory_bank.getKeys();
+            const places = agent.memory_bank?.findMemories?.('', { type: 'place', limit: 20 }) || [];
+            return "Saved places: " + (places.length ? places.map(p => p.content.slice(0, 60)).join(', ') : 'none');
         }
     }, 
     {

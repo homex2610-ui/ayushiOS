@@ -44,7 +44,7 @@ export class OpenRouter {
                 throw new Error('Context length exceeded');
             }
             console.log('Received.');
-            res = completion.choices[0].message.content;
+            res = completion.choices[0].message.content || '';
         } catch (err) {
             console.error('Error while awaiting response:', err);
             // If the error indicates a context-length problem, we can slice the turns array, etc.

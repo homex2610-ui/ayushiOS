@@ -9,23 +9,28 @@ const __dirname = path.dirname(__filename);
 // Each model class must export a static `prefix` string.
 const apiMap = await (async () => {
     const map = {};
-    const files = (await fs.readdir(__dirname))
-        .filter(f => f.endsWith('.js') && f !== '_model_map.js' && f !== 'prompter.js');
-    for (const file of files) {
-        try {
-            const moduleUrl = pathToFileURL(path.join(__dirname, file)).href;
-            const mod = await import(moduleUrl);
-            for (const exported of Object.values(mod)) {
-                if (typeof exported === 'function' && Object.prototype.hasOwnProperty.call(exported, 'prefix')) {
-                    const prefix = exported.prefix;
-                    if (typeof prefix === 'string' && prefix.length > 0) {
-                        map[prefix] = exported;
+    try {
+        const files = (await fs.readdir(__dirname))
+            .filter(f => f.endsWith('.js') && !['_model_map.js', 'prompter.js', 'model_router.js'].includes(f));
+        for (const file of files) {
+            try {
+                const moduleUrl = pathToFileURL(path.join(__dirname, file)).href;
+                const mod = await import(moduleUrl);
+                for (const exported of Object.values(mod)) {
+                    if (typeof exported === 'function' && Object.prototype.hasOwnProperty.call(exported, 'prefix')) {
+                        const prefix = exported.prefix;
+                        if (typeof prefix === 'string' && prefix.length > 0) {
+                            map[prefix] = exported;
+                        }
                     }
                 }
+            } catch (e) {
+                console.warn('Failed to load model module:', file, e?.message || e);
             }
-        } catch (e) {
-            console.warn('Failed to load model module:', file, e?.message || e);
         }
+    } catch (e) {
+        console.error('Failed to read models directory:', e);
+        throw e;
     }
     return map;
 })();
@@ -64,11 +69,11 @@ export function selectAPI(profile) {
                 profile.api = 'qwen';
         }
         if (!profile.api) {
-            throw new Error('Unknown model:', profile.model);
+            throw new Error(`Unknown model: ${profile.model}`);
         }
     }
     if (!apiMap[profile.api]) {
-        throw new Error('Unknown api:', profile.api);
+        throw new Error(`Unknown api: ${profile.api}`);
     }
     let model_name = profile.model.replace(profile.api + '/', ''); // remove prefix
     profile.model = model_name === "" ? null : model_name; // if model is empty, set to null

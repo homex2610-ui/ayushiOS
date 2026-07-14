@@ -1,8 +1,9 @@
 const settings = {
-    "minecraft_version": "auto", // or specific version like "1.21.6"
-    "host": "127.0.0.1", // or "localhost", "your.ip.address.here"
-    "port": 55916, // set to -1 to automatically scan for open ports
-    "auth": "offline", // or "microsoft"
+    "minecraft_version": "auto", // "auto" detects version; or set a specific version like "1.21.4"
+    "host": "play.driftsmp.net", // server IP: "localhost", "your.ip.address.here", or "play.example.com"
+    "port": 25565, // -1 auto-scans LAN; set specific port for servers (e.g. 25565)
+    "auth": "offline", // "offline" for cracked servers / singleplayer LAN; "microsoft" for premium servers
+    "password": "ayushi_ds_2026", // Password for auto-/register and /login (AuthMe, etc.)
 
     // the mindserver manages all agents and hosts the UI
     "mindserver_port": 8080,
@@ -26,8 +27,8 @@ const settings = {
         // individual profiles override values from the base profile
     ],
 
-    "load_memory": false, // load memory from previous session
-    "init_message": "Respond with hello world and your name", // sends to all on spawn
+    "load_memory": true, // load memory from previous session (continues where bot left off)
+    "init_message": null, // sends to all on spawn (null = no message, avoids drawing attention)
     "only_chat_with": [], // users that the bots listen to and send general messages to. if empty it will chat publicly
 
     "speak": false,
@@ -46,17 +47,36 @@ const settings = {
     "code_timeout_mins": -1, // minutes code is allowed to run. -1 for no timeout
     "relevant_docs_count": 5, // number of relevant code function docs to select for prompting. -1 for all
 
-    "max_messages": 15, // max number of messages to keep in context
-    "num_examples": 2, // number of examples to give to the model
+    "max_messages": 6, // max number of messages to keep in context (reduced to save tokens)
+    "num_examples": 1, // number of examples to give to the model (reduced to save tokens)
     "max_commands": -1, // max number of commands that can be used in consecutive responses. -1 for no limit
-    "show_command_syntax": "full", // "full", "shortened", or "none"
-    "narrate_behavior": true, // chat simple automatic actions ('Picking up item!')
+    "show_command_syntax": "none", // "full", "shortened", or "none" — "none" hides all command text from chat
+    "narrate_behavior": false, // chat simple automatic actions ('Picking up item!')
     "chat_bot_messages": true, // publicly chat messages to other bots
 
     "spawn_timeout": 30, // num seconds allowed for the bot to spawn before throwing error. Increase when spawning takes a while.
-    "block_place_delay": 0, // delay between placing blocks (ms) if using newAction. helps avoid bot being kicked by anti-cheat mechanisms on servers.
+    "block_place_delay": 150, // delay between placing blocks (ms) — helps avoid anti-cheat kicks. 150ms mimics human reaction time.
   
     "log_all_prompts": false, // log ALL prompts to file
+
+    // Baby AI / Curiosity Engine
+    "enable_curiosity": false, // disabled to save tokens (bot explores and sets random goals)
+    "enable_deep_awareness": true, // bot tracks surroundings ($WORLD_AWARE)
+
+    // Advanced Brain Systems
+    "enable_emotions": true, // internal emotion state influences decisions
+    "enable_goal_planner": false, // disabled to save tokens (autonomous goal generation every 2min)
+    "enable_relationships": false, // disabled to save tokens (track player relationships)
+    "enable_knowledge_graph": false, // disabled to save tokens (relational triple memory)
+    "enable_episodic_replay": false, // disabled to save tokens (memory consolidation every 25min)
+    "enable_reflection": false, // disabled to save tokens (hourly self-reflection)
+    "enable_skill_learning": false, // disabled to save tokens (learn new skills)
+    "enable_meta_learning": false, // disabled to save tokens (strategy improvement)
+
+    "goal_plan_interval": 120000, // ms between autonomous plan cycles
+    "episodic_replay_interval": 1500000, // ms between memory consolidation (~25min)
+    "reflection_interval": 3600000, // ms between reflections (1hr)
+    "meta_learning_interval": 1200000, // ms between meta-learning (~20min)
 };
 
 export default settings;

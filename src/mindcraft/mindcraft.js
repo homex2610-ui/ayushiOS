@@ -43,6 +43,14 @@ export async function createAgent(settings) {
     let load_memory = settings.load_memory || false;
     let init_message = settings.init_message || null;
 
+    // Allow per-profile server override
+    if (settings.profile.server) {
+        if (settings.profile.server.host) settings.host = settings.profile.server.host;
+        if (settings.profile.server.port != null) settings.port = settings.profile.server.port;
+        if (settings.profile.server.auth) settings.auth = settings.profile.server.auth;
+        if (settings.profile.server.version) settings.minecraft_version = settings.profile.server.version;
+    }
+
     try {
         try {
             const server = await getServer(settings.host, settings.port, settings.minecraft_version);
@@ -50,15 +58,13 @@ export async function createAgent(settings) {
             settings.port = server.port;
             settings.minecraft_version = server.version;
         } catch (error) {
-            console.warn(`Error getting server:`, error);
-            if (settings.minecraft_version === "auto") {
-                settings.minecraft_version = null;
-            }
-            console.warn(`Attempting to connect anyway...`);
+            console.error(`Could not find Minecraft server. Check your settings.`);
+            console.error(`Check: host=${settings.host}, port=${settings.port}, version=${settings.minecraft_version}`);
+            throw error;
         }
 
         const agentProcess = new AgentProcess(agent_name, mindserver_port);
-        agentProcess.start(load_memory, init_message, agentIndex);
+        agentProcess.start(load_memory, init_message, agentIndex, { host: settings.host, port: settings.port, auth: settings.auth, minecraft_version: settings.minecraft_version, password: settings.password });
         agent_processes[settings.profile.name] = agentProcess;
     } catch (error) {
         console.error(`Error creating agent ${agent_name}:`, error);

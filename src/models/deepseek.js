@@ -43,8 +43,7 @@ export class DeepSeek {
                 console.log('Context length exceeded, trying again with shorter context.');
                 return await this.sendRequest(turns.slice(1), systemMessage, stop_seq);
             } else {
-                console.log(err);
-                res = 'My brain disconnected, try again.';
+                throw err;
             }
         }
         return res;

@@ -10,6 +10,19 @@ function parseArguments() {
             type: 'array',
             describe: 'List of agent profile paths',
         })
+        .option('host', {
+            type: 'string',
+            describe: 'Minecraft server address (IP or domain)',
+        })
+        .option('port', {
+            type: 'number',
+            describe: 'Minecraft server port',
+        })
+        .option('auth', {
+            type: 'string',
+            choices: ['offline', 'microsoft'],
+            describe: 'Authentication method',
+        })
         .option('task_path', {
             type: 'string',
             describe: 'Path to task file to execute'
@@ -35,6 +48,16 @@ if (args.task_path) {
     else {
         throw new Error('task_id is required when task_path is provided');
     }
+}
+
+if (args.host) {
+    settings.host = args.host;
+}
+if (args.port) {
+    settings.port = args.port;
+}
+if (args.auth) {
+    settings.auth = args.auth;
 }
 
 // these environment variables override certain settings

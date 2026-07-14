@@ -446,7 +446,6 @@ export class Task {
                 if (this.data.human_count !== this.data.usernames.length) {
                     console.log(`Number of human players ${this.human_count} does not match the number of usernames provided. ${this.data.usernames.length}`);
                     throw new Error(`Number of human players ${this.human_count} does not match the number of usernames provided. ${this.data.usernames.length}`);
-                    return;
                 }
                 
                 const starting_idx = this.data.agent_count;

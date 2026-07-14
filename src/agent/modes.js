@@ -48,6 +48,8 @@ const modes_list = [
             }
             else if (block.name === 'lava' || block.name === 'fire' ||
                 blockAbove.name === 'lava' || blockAbove.name === 'fire') {
+                // human reaction delay 100-400ms
+                await new Promise(r => setTimeout(r, 100 + Math.random() * 300));
                 say(agent, 'I\'m on fire!');
                 // if you have a water bucket, use it
                 let waterBucket = bot.inventory.findInventoryItem('water_bucket');
@@ -146,6 +148,8 @@ const modes_list = [
         update: async function (agent) {
             const enemy = world.getNearestEntityWhere(agent.bot, entity => mc.isHostile(entity), 16);
             if (enemy && await world.isClearPath(agent.bot, enemy)) {
+                // human reaction delay 200-600ms
+                await new Promise(r => setTimeout(r, 200 + Math.random() * 400));
                 say(agent, `Aaa! A ${enemy.name.replace("_", " ")}!`);
                 execute(this, agent, async () => {
                     await skills.avoidEnemies(agent.bot, 24);
@@ -162,9 +166,30 @@ const modes_list = [
         update: async function (agent) {
             const enemy = world.getNearestEntityWhere(agent.bot, entity => mc.isHostile(entity), 8);
             if (enemy && await world.isClearPath(agent.bot, enemy)) {
-                say(agent, `Fighting ${enemy.name}!`);
                 execute(this, agent, async () => {
                     await skills.defendSelf(agent.bot, 8);
+                });
+            }
+        }
+    },
+    {
+        name: 'pvp',
+        description: 'Retaliate against players who attack you.',
+        interrupts: ['all'],
+        on: true,
+        active: false,
+        update: async function (agent) {
+            const attacker = agent.bot.lastAttacker;
+            if (!attacker || Date.now() - (agent.bot.lastDamageTime || 0) > 5000) {
+                agent.bot.lastAttacker = null;
+                return;
+            }
+            if (attacker && agent.bot.entity.position.distanceTo(attacker.position) < 24) {
+                execute(this, agent, async () => {
+                    await skills.equipHighestAttack(agent.bot);
+                    agent.bot.pvp.attack(attacker);
+                    await new Promise(r => setTimeout(r, 5000));
+                    agent.bot.pvp.stop();
                 });
             }
         }
@@ -241,8 +266,11 @@ const modes_list = [
         interrupts: ['action:followPlayer'],
         on: true,
         active: false,
-        distance: 0.5,
+        distance: 1.5,
+        cooldown: 5000,
+        last_trigger: 0,
         update: async function (agent) {
+            if (Date.now() - this.last_trigger < this.cooldown) return;
             const player = world.getNearestEntityWhere(agent.bot, entity => entity.type === 'player', this.distance);
             if (player) {
                 execute(this, agent, async () => {
@@ -250,10 +278,61 @@ const modes_list = [
                     const wait_time = Math.random() * 1000;
                     await new Promise(resolve => setTimeout(resolve, wait_time));
                     if (player.position.distanceTo(agent.bot.entity.position) < this.distance) {
+                        this.last_trigger = Date.now();
                         await skills.moveAwayFromEntity(agent.bot, player, this.distance);
                     }
                 });
             }
+        }
+    },
+    {
+        name: 'walking_gaze',
+        description: 'Look around naturally while walking (humans scan surroundings).',
+        interrupts: [],
+        on: true,
+        active: false,
+        next_gaze_shift: Date.now() + 2000 + Math.random() * 4000,
+        update: function (agent) {
+            if (agent.isIdle()) return;
+            if (Date.now() < this.next_gaze_shift) return;
+            const entity = agent.bot.nearestEntity();
+            if (entity && entity.position.distanceTo(agent.bot.entity.position) < 12 && entity.name !== 'enderman') {
+                const jitterX = (Math.random() - 0.5) * 0.5;
+                const jitterY = (Math.random() - 0.5) * 0.3;
+                agent.bot.lookAt(entity.position.offset(jitterX, entity.height / 2 + jitterY, 0));
+            } else {
+                const yaw = agent.bot.entity.yaw + (Math.random() - 0.5) * 1.5;
+                const pitch = (Math.random() * 0.6) - 0.3;
+                agent.bot.look(yaw, pitch, false);
+            }
+            this.next_gaze_shift = Date.now() + 1500 + Math.random() * 3500;
+        }
+    },
+    {
+        name: 'fidget',
+        description: 'Random human-like movements when idle: jump, sneak, head turn.',
+        interrupts: [],
+        on: true,
+        active: false,
+        next_fidget: Date.now() + 5000 + Math.random() * 15000,
+        update: function (agent) {
+            if (!agent.isIdle()) return;
+            if (Date.now() < this.next_fidget) return;
+            const roll = Math.random();
+            if (roll < 0.4) {
+                // casual jump
+                agent.bot.setControlState('jump', true);
+                setTimeout(() => agent.bot.setControlState('jump', false), 200 + Math.random() * 300);
+            } else if (roll < 0.6) {
+                // quick sneak
+                agent.bot.setControlState('sneak', true);
+                setTimeout(() => agent.bot.setControlState('sneak', false), 300 + Math.random() * 500);
+            } else {
+                const yaw = Math.random() * Math.PI * 2;
+                const pitch = (Math.random() * Math.PI/3) - Math.PI/6;
+                agent.bot.look(yaw, pitch, false);
+            }
+            this.next_fidget = Date.now() + 8000 + Math.random() * 20000;
         }
     },
     {
@@ -272,24 +351,27 @@ const modes_list = [
             if (entity_in_view && entity !== this.last_entity) {
                 this.staring = true;
                 this.last_entity = entity;
-                this.next_change = Date.now() + Math.random() * 1000 + 4000;
+                // randomise look-at height slightly for human imperfection
+                this.next_change = Date.now() + Math.random() * 1000 + 2000;
             }
             if (entity_in_view && this.staring) {
                 let isbaby = entity.type !== 'player' && entity.metadata[16];
                 let height = isbaby ? entity.height/2 : entity.height;
-                agent.bot.lookAt(entity.position.offset(0, height, 0));
+                // add micro-jitter to gaze — humans never stare perfectly still
+                const jitterX = (Math.random() - 0.5) * 0.3;
+                const jitterY = (Math.random() - 0.5) * 0.15;
+                agent.bot.lookAt(entity.position.offset(jitterX, height + jitterY, 0));
             }
             if (!entity_in_view)
                 this.last_entity = null;
             if (Date.now() > this.next_change) {
-                // look in random direction
                 this.staring = Math.random() < 0.3;
                 if (!this.staring) {
                     const yaw = Math.random() * Math.PI * 2;
                     const pitch = (Math.random() * Math.PI/2) - Math.PI/4;
                     agent.bot.look(yaw, pitch, false);
                 }
-                this.next_change = Date.now() + Math.random() * 10000 + 2000;
+                this.next_change = Date.now() + Math.random() * 8000 + 2000;
             }
         }
     },
@@ -305,7 +387,7 @@ const modes_list = [
 
 async function execute(mode, agent, func, timeout=-1) {
     if (agent.self_prompter.isActive())
-        agent.self_prompter.stopLoop();
+        await agent.self_prompter.stopLoop();
     let interrupted_action = agent.actions.currentActionLabel;
     mode.active = true;
     let code_return = await agent.actions.runAction(`mode:${mode.name}`, async () => {
