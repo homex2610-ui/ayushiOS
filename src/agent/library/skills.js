@@ -478,14 +478,14 @@ export async function defendSelf(bot, range=9) {
             try {
                 bot.pathfinder.setMovements(new pf.Movements(bot));
                 await bot.pathfinder.goto(new pf.goals.GoalFollow(enemy, 3.5), true);
-            } catch (err) {/* might error if entity dies, ignore */}
+            } catch (err) { console.warn(`[defendSelf] chase follow: ${err.message}`); }
         }
         if (bot.entity.position.distanceTo(enemy.position) <= 2) {
             try {
                 bot.pathfinder.setMovements(new pf.Movements(bot));
                 let inverted_goal = new pf.goals.GoalInvert(new pf.goals.GoalFollow(enemy, 2));
                 await bot.pathfinder.goto(inverted_goal, true);
-            } catch (err) {/* might error if entity dies, ignore */}
+            } catch (err) { console.warn(`[defendSelf] backup: ${err.message}`); }
         }
         bot.pvp.attack(enemy);
         attacked = true;
@@ -1706,8 +1706,8 @@ export async function tillAndSow(bot, x, y, z, seedType=null) {
                 seedType = seedType.replace(remove, '');
             }
         }
-        placeBlock(bot, 'farmland', x, y, z);
-        placeBlock(bot, seedType, x, y+1, z);
+        await placeBlock(bot, 'farmland', x, y, z);
+        await placeBlock(bot, seedType, x, y+1, z);
         return true;
     }
 
@@ -2303,9 +2303,9 @@ export async function stripMine(bot, length=20, direction=null) {
         const pos = start.plus(forward.scaled(i));
         const block = bot.blockAt(pos);
         if (block && block.name !== 'air' && block.name !== 'cave_air' && block.name !== 'water' && block.name !== 'lava') {
-            try { await equipHighestAttack(bot); } catch (e) {}
-            try { await bot.dig(block); } catch (e) {}
-            try { await pickupNearbyItems(bot); } catch (e) {}
+            try { await equipHighestAttack(bot); } catch (e) { console.warn(`[stripMine] equip: ${e.message}`); }
+            try { await bot.dig(block); } catch (e) { console.warn(`[stripMine] dig: ${e.message}`); }
+            try { await pickupNearbyItems(bot); } catch (e) { console.warn(`[stripMine] pickup: ${e.message}`); }
             // Human-like delay between blocks (anti-cheat)
             await new Promise(r => setTimeout(r, 200 + Math.random() * 400));
         }
@@ -2650,7 +2650,7 @@ export async function teleportTo(bot, x, y, z) {
 
 export async function spamRightClick(bot, times=5, delay=100) {
     for (let i = 0; i < times; i++) {
-        bot.activateItem();
+        await bot.activateItem();
         await new Promise(r => setTimeout(r, delay));
         if (bot.interrupt_code) break;
     }

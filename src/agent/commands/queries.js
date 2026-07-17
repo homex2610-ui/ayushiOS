@@ -7,7 +7,7 @@ import { load } from 'cheerio';
 
 const pad = (str) => {
     return '\n' + str + '\n';
-}
+};
 
 // queries are commands that just return strings and don't affect anything in the world
 export const queryList = [
@@ -49,8 +49,7 @@ export const queryList = [
             let action = agent.actions.currentActionLabel;
             if (agent.isIdle())
                 action = 'Idle';
-            res += `\- Current Action: ${action}`;
-
+            res += `- Current Action: ${action}`;
 
             let players = world.getNearbyPlayerNames(bot);
             let bots = convoManager.getInGameAgents().filter(b => b !== agent.name);
@@ -222,9 +221,40 @@ export const queryList = [
     {
         name: '!savedPlaces',
         description: 'List all saved locations.',
-        perform: async function (agent) {
+        perform: function (agent) {
             const places = agent.memory_bank?.findMemories?.('', { type: 'place', limit: 20 }) || [];
             return "Saved places: " + (places.length ? places.map(p => p.content.slice(0, 60)).join(', ') : 'none');
+        }
+    },
+    {
+        name: '!beliefs',
+        description: 'Show the bot\'s current belief state, including known safe spots, food sources, and discovered warps.',
+        perform: function (agent) {
+            const brain = agent.brain;
+            if (!brain || !brain.memory) {
+                return 'Beliefs unavailable: AyushiOS brain is not initialized.';
+            }
+            const pos = brain.senses?.getSnapshot?.().environment?.position;
+            if (!pos) return 'Beliefs unavailable: position unknown.';
+            const beliefs = brain.memory.getBeliefs?.(pos);
+            if (!beliefs) return 'No beliefs available yet.';
+            const parts = [];
+            parts.push(`Safe base: ${beliefs.hasSafeBase ? beliefs.nearestSafeBase?.name || 'known' : 'none'}`);
+            if (beliefs.nearestFoodSource) {
+                parts.push(`Food source: ${beliefs.nearestFoodSource.name} @ ${beliefs.nearestFoodSource.position.x},${beliefs.nearestFoodSource.position.z}`);
+            }
+            if (beliefs.knownNPCs && beliefs.knownNPCs.length > 0) {
+                parts.push(`Known NPCs: ${beliefs.knownNPCs.map(n => n.name).slice(0, 5).join(', ')}`);
+            }
+            if (beliefs.knownCommands && beliefs.knownCommands.length > 0) {
+                parts.push(`Known commands: ${beliefs.knownCommands.join(', ')}`);
+            }
+            if (beliefs.connectedLocations && beliefs.connectedLocations.length > 0) {
+                parts.push(`Connected places: ${beliefs.connectedLocations.slice(0, 5).join(', ')}`);
+            }
+            parts.push(`Known warps: ${beliefs.knownWarpCount}`);
+            parts.push(`Hazards nearby: ${beliefs.hazardsNearby ? beliefs.hazardCount : 0}`);
+            return 'BELIEFS\n' + parts.join('\n');
         }
     }, 
     {
@@ -316,7 +346,7 @@ export const queryList = [
             'query': { type: 'string', description: 'The query to search for.' }
         },
         perform: async function (agent, query) {
-            const url = `https://minecraft.wiki/w/${query}`
+            const url = `https://minecraft.wiki/w/${query}`;
             try {
                 const response = await fetch(url);
                 if (response.status === 404) {
@@ -334,14 +364,14 @@ export const queryList = [
                 return divContent.trim();
               } catch (error) {
                 console.error("Error fetching or parsing HTML:", error);
-                return `The following error occurred: ${error}`
+                return `The following error occurred: ${error}`;
               }
         }
     },
     {
         name: '!help',
         description: 'Lists all available commands and their descriptions.',
-        perform: async function (agent) {
+        perform: function (agent) {
             return getCommandDocs(agent);
         }
     },

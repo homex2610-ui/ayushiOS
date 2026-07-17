@@ -1,15 +1,12 @@
 import { LANScanner } from './LANScanner.js';
 import { WorldDetector } from './WorldDetector.js';
-import { HubNavigator } from './HubNavigator.js';
 import { ServerSelector } from './ServerSelector.js';
 import { ReconnectManager } from './ReconnectManager.js';
 import { HealthMonitor } from './HealthMonitor.js';
 import { HubStateMachine } from '../hub/HubStateMachine.js';
+import { HubNavigator } from '../hub/HubNavigator.js';
 import { computeHubScore } from '../hub/HubDetector.js';
 import { HubProfile } from '../hub/HubProfile.js';
-import { HubNavigator as NewHubNavigator } from '../hub/HubNavigator.js';
-import { HubHotbarManager } from '../hub/HubHotbarManager.js';
-import { HubGUIClient } from '../hub/HubGUIClient.js';
 import { dumpAll } from '../debug/ServerInspectors.js';
 import CONNECTION_CONFIG, { ServerState, WorldType } from './ConnectionSettings.js';
 
@@ -19,20 +16,20 @@ export class ConnectionManager {
         this.lanScanner = new LANScanner();
         this.serverSelector = new ServerSelector({});
         this.worldDetector = null;
-        this.hubNavigator = null;
+        this._hubStateMachine = null;
         this.reconnectManager = new ReconnectManager();
         this.healthMonitor = null;
         this.bot = null;
         this._targetServer = null;
         this._onReadyCallback = null;
         this._onStateChange = null;
-        this._resolveReady = null;
+        this._readyResolvers = [];
     }
 
     setBot(bot) {
         this.bot = bot;
         this.worldDetector = new WorldDetector(bot);
-        this.hubNavigator = new HubNavigator(bot);
+        this._hubStateMachine = null;
         this.healthMonitor = new HealthMonitor(bot);
         this._lastInspectTime = 0;
         this._registerInspectCommand();
@@ -121,7 +118,7 @@ export class ConnectionManager {
 
     async waitForReady(timeoutMs = 60000) {
         return new Promise((resolve, reject) => {
-            this._resolveReady = resolve;
+            this._readyResolvers.push(resolve);
 
             const timeout = setTimeout(() => {
                 console.warn('[Connection] Ready timeout reached');
@@ -170,7 +167,7 @@ export class ConnectionManager {
             console.log(`[Connection] Found saved profile for ${cachedProfile.server || hubProfile._getServerKey()}. Attempting fast-join...`);
             const hotbarManager = new HubHotbarManager(this.bot);
             const guiClient = new HubGUIClient(this.bot);
-            const fastNavigator = new NewHubNavigator(this.bot, null, hotbarManager, guiClient);
+            const fastNavigator = new HubNavigator(this.bot, null, hotbarManager, guiClient);
             const fastResult = await fastNavigator.fastJoin(cachedProfile);
             if (fastResult) {
                 console.log('[Connection] Fast-join succeeded — bypass classification');
@@ -224,7 +221,12 @@ export class ConnectionManager {
         const targetName = this._detectTargetFromScoreboard(worldProfile) || 'survival';
         console.log(`[Connection] Detected hub — navigating to: ${targetName}`);
 
-        const navPromise = this.hubNavigator.navigateToMode(targetName);
+        if (!this._hubStateMachine) {
+            this._hubStateMachine = new HubStateMachine({ bot: this.bot });
+        }
+        this._hubStateMachine.onComplete(() => {});
+        this._hubStateMachine.onFail(() => {});
+        const navPromise = this._hubStateMachine.start(targetName);
         const timeoutPromise = new Promise(r => setTimeout(() => r(false), 60000));
         const navigated = await Promise.race([navPromise, timeoutPromise]);
 
@@ -263,7 +265,8 @@ export class ConnectionManager {
             server: this._targetServer
         };
         if (this._onReadyCallback) this._onReadyCallback(result);
-        if (this._resolveReady) this._resolveReady(result);
+        for (const resolve of this._readyResolvers) resolve(result);
+        this._readyResolvers = [];
         return result;
     }
 
@@ -289,7 +292,7 @@ export class ConnectionManager {
         console.log('[Connection] Shutting down connection manager...');
         this.reconnectManager.stop();
         this.stopHealthMonitoring();
-        if (this.hubNavigator) this.hubNavigator.reset();
+        this._hubStateMachine = null;
     }
 
     updateConfig(settings) {

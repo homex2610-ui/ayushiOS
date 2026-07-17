@@ -3,11 +3,11 @@ const settings = {
     "host": "play.kryonmc.net", // server IP: "localhost", "your.ip.address.here", or "play.example.com"
     "port": 25565, // -1 auto-scans LAN; set specific port for servers (e.g. 25565)
     "auth": "offline", // "offline" for cracked servers / singleplayer LAN; "microsoft" for premium servers
-    "password": "ayushi_ds_2026", // Password for auto-/register and /login (AuthMe, etc.)
+    "password": process.env.MC_PASSWORD || "", // Password for auto-/register and /login (AuthMe, etc.)
 
     // the mindserver manages all agents and hosts the UI
     "mindserver_port": 8080,
-    "auto_open_ui": true, // opens UI in browser on startup
+    "auto_open_ui": false, // opens UI in browser on startup
     
     "base_profile": "assistant", // survival, assistant, creative, or god_mode
     "profiles": [

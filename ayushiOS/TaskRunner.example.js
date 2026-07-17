@@ -27,6 +27,9 @@ export default class TaskRunner {
       flee_or_barricade: async (bot, params) => {
         console.log(`[TaskRunner:stub] flee/barricade from`, params.threats);
       },
+      go_to_waypoint: async (bot, params) => {
+        console.log(`[TaskRunner:stub] go to waypoint ${params.waypointId} at`, params.position);
+      },
       move_away_from: async (bot, params) => {
         console.log(`[TaskRunner:stub] move away from ${params.username}`);
       },

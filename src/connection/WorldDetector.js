@@ -289,10 +289,8 @@ export class WorldDetector {
         try {
             const modeNpcKeywords = ['survival', 'smp', 'lifesteal', 'practice', 'kitpvp', 'bedwars', 'skywars', 'minigame', 'parkour', 'factions', 'advertise'];
             const hasModeNPCs = Object.values(this.bot.entities || {}).some(e => {
-                const entityName = e.username || e.name || e.displayName || '';
-                if (e.type === 'player' && entityName === this.bot.username) return false;
-                if (e.type === 'player' && entityName && this.bot.players?.[entityName]) return false;
                 const name = (e.displayName || e.name || e.username || '').toLowerCase().replace(/§./g, '');
+                if (e.type === 'player' && (name === this.bot.username?.toLowerCase() || name.startsWith('player'))) return false;
                 const customName = e.metadata?.[2]?.toString?.().replace(/§./g, '').toLowerCase().trim();
                 const matchText = customName || name;
                 return matchText.length > 0 && modeNpcKeywords.some(k => matchText.includes(k));

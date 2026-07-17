@@ -5,13 +5,11 @@
 //   Broca-ish half:    produce what Ayushi says
 //
 // Default mode is template-based (instant, free, offline-safe).
-// If FEATURES.enableLLMDialogue is on and ANTHROPIC_API_KEY is
-// set, generateSpeech() will instead ask Claude for a line in
-// character — this is the "inner monologue" upgrade suggested
-// in the README.
+// This bot uses deterministic template replies only; no LLM or external
+// model API calls are used by default in AyushiOS.
 // ─────────────────────────────────────────────────────────────
 
-import { FEATURES, CHARACTER } from './config.js';
+import { CHARACTER } from './config.js';
 
 const INTENT_PATTERNS = [
   { intent: 'greeting', re: /\b(hi|hello|hey|yo)\b/i },
@@ -23,9 +21,8 @@ const INTENT_PATTERNS = [
 ];
 
 export class BrocaArea {
-  constructor(bus, anthropicClient = null) {
+  constructor(bus) {
     this.bus = bus;
-    this.anthropic = anthropicClient; // optional injected client for LLM dialogue
     this.bus.on('heard_speech', (e) => this._interpret(e));
   }
 
@@ -51,24 +48,6 @@ export class BrocaArea {
   // Optional: richer, in-character line via LLM. Only called if you
   // wire an Anthropic client in and flip FEATURES.enableLLMDialogue.
   async generateSpeech(context) {
-    if (!FEATURES.enableLLMDialogue || !this.anthropic) {
-      return this.templateReply(context.intent, context.username);
-    }
-    try {
-      const res = await this.anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 60,
-        messages: [{
-          role: 'user',
-          content: `You are ${CHARACTER.name}, ${CHARACTER.bio}. ` +
-            `Current mood: ${context.mood}. A player named ${context.username} just said: ` +
-            `"${context.message}". Reply in one short in-character sentence, no quotes, no narration.`
-        }]
-      });
-      return res.content.find(b => b.type === 'text')?.text?.trim() ?? null;
-    } catch (err) {
-      console.error('[BrocaArea] LLM dialogue failed, falling back to template:', err);
-      return this.templateReply(context.intent, context.username);
-    }
+    return this.templateReply(context.intent, context.username);
   }
 }

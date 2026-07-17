@@ -117,4 +117,14 @@ export class NPCAnalyzer {
         }
         return results;
     }
+
+    getNearestNPC(bot, maxDistance = 8) {
+        if (!bot?.entity?.position) return null;
+        const pos = bot.entity.position;
+        return (this.kb.get('npcs') || [])
+            .filter(npc => npc.position)
+            .map(npc => ({ ...npc, distance: pos.distanceTo(npc.position) }))
+            .filter(npc => npc.distance <= maxDistance)
+            .sort((a, b) => a.distance - b.distance)[0] || null;
+    }
 }

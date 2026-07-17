@@ -28,9 +28,20 @@ const NEEDS = [
       const scared = 1 - p.traits.bravery;
       return Math.min(1, 0.4 + s.threats.length * 0.2 * scared);
     },
-    goal: (s) => ({ task: 'seek_safety', steps: [
-      { skill: 'flee_or_barricade', params: { threats: s.threats } }
-    ]})
+    goal: (s) => {
+      const safeWaypoint = this.memory?.getSafeWaypoint(s.environment.position);
+      if (safeWaypoint) {
+        return {
+          task: 'seek_safety',
+          steps: [
+            { skill: 'go_to_waypoint', params: { waypointId: safeWaypoint.id, position: safeWaypoint.position, reason: 'threat_evade' } }
+          ]
+        };
+      }
+      return ({ task: 'seek_safety', steps: [
+        { skill: 'flee_or_barricade', params: { threats: s.threats } }
+      ]});
+    }
   },
   {
     name: 'sleep',

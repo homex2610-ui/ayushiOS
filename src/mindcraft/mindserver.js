@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as mindcraft from './mindcraft.js';
 import { readFileSync } from 'fs';
+import { safeReadJSON } from '../utils/safe_json.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Mindserver is:
@@ -17,7 +18,7 @@ let server;
 const agent_connections = {};
 const agent_listeners = [];
 
-const settings_spec = JSON.parse(readFileSync(path.join(__dirname, 'public/settings_spec.json'), 'utf8'));
+const settings_spec = safeReadJSON(() => readFileSync(path.join(__dirname, 'public/settings_spec.json'), 'utf8'), {});
 
 class AgentConnection {
     constructor(settings, viewer_port) {
@@ -203,14 +204,16 @@ export function createMindServer(host_public = false, port = 8080) {
                 return;
             }
             console.log(`${curAgentName} sending message to ${agentName}: ${json.message}`);
-            agent_connections[agentName].socket.emit('chat-message', curAgentName, json);
+            if (agent_connections[agentName].socket) {
+                agent_connections[agentName].socket.emit('chat-message', curAgentName, json);
+            }
         });
 
         socket.on('set-agent-settings', (agentName, settings) => {
             const agent = agent_connections[agentName];
             if (agent) {
                 agent.setSettings(settings);
-                agent.socket.emit('restart-agent');
+                if (agent.socket) agent.socket.emit('restart-agent');
             }
         });
 
@@ -263,7 +266,9 @@ export function createMindServer(host_public = false, port = 8080) {
                 return;
 			}
 			try {
-                agent_connections[agentName].socket.emit('send-message', data);
+                if (agent_connections[agentName].socket) {
+                    agent_connections[agentName].socket.emit('send-message', data);
+                }
 			} catch (error) {
 				console.error('Error: ', error);
 			}
@@ -318,9 +323,12 @@ function addListener(listener_socket) {
                 let agent = agent_connections[agentName];
                 if (agent.in_game && agent.socket) {
                     try {
-                        const state = await new Promise((resolve) => {
-                            agent.socket.emit('get-full-state', (s) => resolve(s));
-                        });
+                        const state = await Promise.race([
+                            new Promise((resolve) => {
+                                agent.socket.emit('get-full-state', (s) => resolve(s));
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('getFullState timeout')), 5000))
+                        ]);
                         states[agentName] = state;
                     } catch (e) {
                         states[agentName] = { error: String(e) };
@@ -335,7 +343,8 @@ function addListener(listener_socket) {
 }
 
 function removeListener(listener_socket) {
-    agent_listeners.splice(agent_listeners.indexOf(listener_socket), 1);
+    const idx = agent_listeners.indexOf(listener_socket);
+    if (idx !== -1) agent_listeners.splice(idx, 1);
     if (agent_listeners.length === 0) {
         clearInterval(listenerInterval);
         listenerInterval = null;

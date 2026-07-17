@@ -23,10 +23,8 @@ export class AyushiOS {
   /**
    * @param {import('mineflayer').Bot} bot
    * @param {{runTask: (steps: any[]) => Promise<void>}} taskRunner  your existing skill engine
-   * @param {object} [opts]
-   * @param {object} [opts.anthropicClient]  optional injected Anthropic client for LLM dialogue
    */
-  constructor(bot, taskRunner, opts = {}) {
+  constructor(bot, taskRunner) {
     this.bot = bot;
     this.bus = new EventBus();
 
@@ -38,7 +36,7 @@ export class AyushiOS {
     this.executive = new ExecutiveBrain(this.memory, this.personality, this.tom, this.bus);
     this.motor = new MotorCortex(bot, taskRunner, this.bus);
     this.spinalCord = new SpinalCord(bot, this.bus); // wires itself to bus + bot events
-    this.broca = new BrocaArea(this.bus, opts.anthropicClient ?? null);
+    this.broca = new BrocaArea(this.bus);
 
     this._wireCrossModuleEffects();
     this._startCognitiveLoop();
@@ -50,7 +48,7 @@ export class AyushiOS {
     // Sleeping -> dream
     this.bus.on('sleep_started', () => this.memory.dreamAndConsolidate());
 
-    // Understood speech -> reply (template by default, LLM if enabled) + relationship nudge
+    // Understood speech -> reply using deterministic templates + relationship nudge
     this.bus.on('speech_understood', async ({ username, message, intent }) => {
       if (intent === 'thanks' || intent === 'command_follow') {
         this.memory.updatePlayerRelationship(username, +1, `helped/thanked: "${message}"`);

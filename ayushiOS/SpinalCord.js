@@ -56,6 +56,14 @@ export class SpinalCord {
 
     // 6. Sleep -> dream trigger (handed off to MemoryMatrix by AyushiOS)
     this.bot.on('sleep', () => this.bus.emit('sleep_started', {}));
+
+    // 7. Death reporting for memory and hazard learning.
+    this.bot.on('death', () => {
+      this.bus.emit('death_reported', {
+        reason: 'death',
+        position: this.bot.entity?.position,
+      });
+    });
   }
 
   _fire(reflexType, meta) {

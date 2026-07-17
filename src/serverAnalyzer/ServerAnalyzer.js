@@ -124,7 +124,17 @@ export class ServerAnalyzer {
 
     onWindowOpen(window) {
         if (!this.enabled) return;
-        this.gui.feed(window);
+        const gui = this.gui.feed(window);
+        const nearbyNpc = this.npc.getNearestNPC(this.bot);
+        if (gui && nearbyNpc) {
+            const npcs = this.kb.get('npcs') || [];
+            const npc = npcs.find(entry => entry.name === nearbyNpc.name && entry.position?.x === nearbyNpc.position?.x && entry.position?.z === nearbyNpc.position?.z);
+            if (npc) {
+                npc.functions = [...new Set([...(npc.functions || []), ...(gui.functions || [])])];
+                npc.lastInteraction = { gui: gui.title, category: gui.category, time: Date.now() };
+                this.kb.save();
+            }
+        }
         if (window.title?.text) {
             this.plugins.observeGUI(window.title.text);
         }

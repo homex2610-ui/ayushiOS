@@ -20,13 +20,7 @@ bot.once('spawn', () => {
 
   const taskRunner = new TaskRunner(bot);
 
-  // Optional: pass an Anthropic client to unlock LLM-generated dialogue
-  // (also flip FEATURES.enableLLMDialogue to true in config.js).
-  //
-  // import Anthropic from '@anthropic-ai/sdk';
-  // const anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  //
-  const brain = new AyushiOS(bot, taskRunner /*, { anthropicClient } */);
+  const brain = new AyushiOS(bot, taskRunner);
 
   // She's alive now: perceiving every tick, reflexively dodging danger,
   // tracking who she trusts, dreaming when she sleeps, and picking her

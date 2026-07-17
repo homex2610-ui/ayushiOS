@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { selectAPI, createModel } from './_model_map.js';
 import { ModelRouter } from './model_router.js';
 import { AIService } from '../services/ai_service.js';
+import { safeReadJSON } from '../utils/safe_json.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +21,7 @@ export class Prompter {
         this.agent = agent;
         this.profile = profile;
         const defaults_dir = path.join(__dirname, '../../profiles/defaults');
-        let default_profile = JSON.parse(readFileSync(path.join(defaults_dir, '_default.json'), 'utf8'));
+        let default_profile = safeReadJSON(() => readFileSync(path.join(defaults_dir, '_default.json'), 'utf8'), {});
         let base_fp;
         if (settings.base_profile.includes('survival')) {
             base_fp = path.join(defaults_dir, 'survival.json');
@@ -33,7 +34,7 @@ export class Prompter {
         } else {
             throw new Error(`Unknown base_profile: "${settings.base_profile}". Must be one of: survival, assistant, creative, god_mode`);
         }
-        let base_profile = JSON.parse(readFileSync(base_fp, 'utf8'));
+        let base_profile = safeReadJSON(() => readFileSync(base_fp, 'utf8'), {});
 
         // first use defaults to fill in missing values in the base profile
         for (let key in default_profile) {

@@ -39,8 +39,8 @@ export class PersonalityEngine {
     return this.currentMood;
   }
 
-  // Fixed-template tone (fast, free, offline). See BrocaArea.js for an
-  // optional LLM-driven version that's more varied/natural.
+  // Fixed-template tone (fast, free, offline). Dialogue is generated from
+  // deterministic templates and mood state only.
   getDialogueTone() {
     switch (this.currentMood) {
       case "Panicked": return "AHHH! Everything is trying to kill me! Need backup!";

@@ -24,17 +24,28 @@ export class GUIAnalyzer {
                     });
                 }
             }
+            const classification = this._classifyGUI(title, slots);
             const entry = {
                 title,
                 type: window.type,
+                category: classification.type,
+                functions: classification.functions,
                 size: window.containerSize,
                 itemCount,
                 slots: slots.slice(0, 20),
                 firstSeen: Date.now(),
                 lastSeen: Date.now(),
             };
-            this.kb.push('guiMenus', entry);
-            this._classifyGUI(title, slots);
+            const menus = this.kb.get('guiMenus') || [];
+            const existing = menus.find(menu => menu.title === entry.title && menu.category === entry.category);
+            if (existing) {
+                Object.assign(existing, entry, { firstSeen: existing.firstSeen, seenCount: (existing.seenCount || 1) + 1 });
+                this.kb.save();
+            } else {
+                entry.seenCount = 1;
+                this.kb.push('guiMenus', entry);
+            }
+            return entry;
         } catch (_) {}
     }
 
@@ -57,6 +68,14 @@ export class GUIAnalyzer {
         else if (lower.includes('kit') || lower.includes('donation') || lower.includes('rank') || lower.includes('upgrade')) type = 'kit';
         else if (lower.includes('vote') || lower.includes('reward')) type = 'vote';
 
+        const functions = new Set(type ? [type] : []);
+        const text = slots.map(slot => `${slot.name || ''} ${(slot.lore || []).join(' ')}`).join(' ').toLowerCase();
+        if (/buy|sell|price|cost|purchase/.test(text)) functions.add('trade');
+        if (/accept|claim|start quest|complete quest|objective/.test(text)) functions.add('quest');
+        if (/teleport|warp|travel|destination/.test(text)) functions.add('travel');
+        if (/upgrade|level|tier|unlock|requirement/.test(text)) functions.add('progression');
+        if (/crate|key|reward|loot/.test(text)) functions.add('rewards');
+
         if (type) {
             this.kb.push('knownGUITypes', { type, title, firstSeen: Date.now() });
         }
@@ -71,5 +90,6 @@ export class GUIAnalyzer {
                 });
             }
         }
+        return { type: type || 'unknown', functions: [...functions] };
     }
 }

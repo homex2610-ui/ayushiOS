@@ -19,12 +19,12 @@ export class ItemLoreAnalyzer {
         };
         this.kb.push('itemLores', entry);
 
-        this._classifyItem(item.name, lore);
+        this._classifyItem(item.name, lore, entry.displayName);
         this._extractPluginInfo(lore);
         this._extractEconomyInfo(lore);
     }
 
-    _classifyItem(name, lore) {
+    _classifyItem(name, lore, displayName = name) {
         const lower = name.toLowerCase();
         const allText = lore.join(' ').toLowerCase();
         let category = 'misc';
@@ -35,8 +35,13 @@ export class ItemLoreAnalyzer {
         else if (lower.includes('crate') || lower.includes('key') || lower.includes('token')) category = 'crate';
         else if (lower.includes('block') || lower.includes('plank') || lower.includes('stone') || lower.includes('ore') || lower.includes('ingot')) category = 'material';
 
-        if (allText.includes('custom') || allText.includes('mythic') || allText.includes('legendary') || allText.includes('unique') || allText.includes('rare')) {
-            this.kb.push('customItems', { name, category, lore: lore.slice(0, 3), ts: Date.now() });
+        if (allText.includes('custom') || allText.includes('mythic') || allText.includes('legendary') || allText.includes('unique') || allText.includes('rare') || /\[[^\]]+\]/.test(displayName)) {
+            const functions = [];
+            if (/right.click|right click|use to|ability|activate/.test(allText)) functions.push('activated_ability');
+            if (/damage|attack|strength/.test(allText)) functions.push('combat');
+            if (/speed|haste|luck|health|regen/.test(allText)) functions.push('stat_bonus');
+            if (/quest|mission|objective/.test(allText)) functions.push('quest_item');
+            this.kb.push('customItems', { name, displayName, category, functions, lore: lore.slice(0, 3), ts: Date.now() });
         }
     }
 
@@ -68,7 +73,7 @@ export class ItemLoreAnalyzer {
             this.kb.set('economy.enabled', true);
             const price = parseFloat(priceMatch[1].replace(',', ''));
             if (!isNaN(price)) {
-                this.kb.push('observedPrices', { item: this._lastItemName, price, ts: Date.now() });
+                this.kb.push('observedPrices', { price, ts: Date.now() });
             }
         }
     }

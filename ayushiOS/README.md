@@ -82,10 +82,12 @@ brain" framing hold up under more situations:
   distinguishes "things that happened" (episodic: dated, decays) from "things I
   know" (semantic: home coordinates, named bases, resource locations) — this
   mirrors how human memory actually splits.
-- **Language layer (`BrocaArea.js`)** — basic intent detection on incoming chat
-  (not just logging it), plus an optional hook to have an LLM (Claude) generate
-  natural in-character dialogue instead of fixed strings, gated behind a feature
-  flag so it's fully optional.
+  - **Persistent world knowledge graph** — Ayushi now stores discovered waypoints,
+    safe shelters, warp points, server commands, and hazards in durable semantic
+    memory so she can reuse them across sessions instead of rediscovering them.
+  - **Language layer (`BrocaArea.js`)** — basic intent detection on incoming chat
+    (not just logging it). Dialogue generation is deterministic and offline-safe
+    to keep the bot fully code-driven.
 - **Mood-gated risk-taking** — `PersonalityEngine.allowsRiskyTasks()` lets fear
   override curiosity/sociability even when they'd otherwise win the goal
   arbitration, so a "Panicked" Ayushi won't wander off to explore mid-crisis.

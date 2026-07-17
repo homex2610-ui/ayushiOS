@@ -17,7 +17,7 @@ while ($restartCount -lt $maxRestarts) {
     Write-Host "`n[$timestamp] Launch #$restartCount - Starting bot..." -ForegroundColor Green
     
     try {
-        $process = Start-Process -FilePath "node" -ArgumentList "--experimental-require-module main.js" -NoNewWindow -PassThru -Wait -RedirectStandardOutput "bot_output.log" -RedirectStandardError "bot_error.log"
+        $process = Start-Process -FilePath "node" -ArgumentList "main.js" -NoNewWindow -PassThru -Wait -RedirectStandardOutput "bot_output.log" -RedirectStandardError "bot_error.log"
         
         $exitCode = $process.ExitCode
         $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

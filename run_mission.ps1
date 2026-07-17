@@ -46,7 +46,7 @@ function Start-Mission {
     # Start the bot process
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "node"
-    $psi.Arguments = "--experimental-require-module main.js"
+    $psi.Arguments = "main.js"
     $psi.WorkingDirectory = $PSScriptRoot
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true

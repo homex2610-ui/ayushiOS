@@ -56,6 +56,10 @@ export class AyushiOS {
     this.bus.on('mood_changed', ({ from, to }) => {
       this.memory.recordEvent(`Mood shifted ${from} -> ${to}`, 1);
     });
+
+    this.bus.on('task_failed', ({ taskName, error }) => {
+      this.memory.recordEvent(`Task failed: ${taskName} (${error})`, 2);
+    });
   }
 
   _startCognitiveLoop() {

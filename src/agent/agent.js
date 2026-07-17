@@ -42,6 +42,8 @@ import { EventEmitter } from 'events';
 import { startIdleLookRoutine } from './Humanizer.js';
 import { AyushiOS } from '../brain/AyushiOS.js';
 import { TaskRunner } from './TaskRunner.js';
+import { EventBus } from '../core/EventBus.js';
+import { WorldState } from '../core/WorldState.js';
 
 // Behavior Tree modules
 import { BTMemory } from './bt/memory.js';
@@ -131,7 +133,10 @@ export class Agent extends EventEmitter {
 
         console.log(this.name, 'logging into minecraft...');
         this.bot = initBot(this.name);
-        
+
+        this.eventBus = new EventBus(this.bot);
+        this.worldState = new WorldState(this.bot);
+
         // Connection Handler
         const onDisconnect = (event, reason) => {
             if (this._disconnectHandled) return;
@@ -140,16 +145,16 @@ export class Agent extends EventEmitter {
             const { type } = handleDisconnection(this.name, reason);
 
             const navOnBot = this.bot && this.bot._navigationInProgress;
-            const navOnManager = connectionManager.hubNavigator && connectionManager.hubNavigator.isNavigating;
-            const wasNavigating = navOnBot || navOnManager;
-            if (wasNavigating) {
+            if (navOnBot) {
                 console.log('[Agent] Disconnected during hub navigation — allowing reconnect for fallback.');
                 return;
             }
 
             // Don't crash — allow reconnect manager to handle it
             if (settings.connection_auto_reconnect) {
-                console.log('[Agent] Disconnected — auto-reconnect will handle reconnection.');
+                console.log('[Agent] Disconnected — restarting for auto-reconnect.');
+                // In child-process architecture, exit so run_forever.ps1 restarts quickly
+                setTimeout(() => process.exit(1), 500);
                 return;
             }
             process.exit(1);
@@ -359,6 +364,7 @@ export class Agent extends EventEmitter {
                     try {
                         this.taskRunner = new TaskRunner(this.bot);
                         this.brain = new AyushiOS(this.bot, this.taskRunner);
+                        this._syncServerAnalyzerKnowledgeToMemory();
                         // Immediately mark motor as busy to prevent brain tasks from interfering with diamond grind
                         if (this.brain && this.brain.motor) {
                             this.brain.motor.isBusy = true;
@@ -407,7 +413,11 @@ export class Agent extends EventEmitter {
                                 console.log(`[Agent] Near spawn (${Math.round(p.x)}, ${Math.round(p.z)}), walking away to find resources...`);
                                 const walkSkill = this.taskRunner?.skills?.['move_to'];
                                 if (walkSkill) {
-                                    await walkSkill({ x: 100, z: 100, range: 5 });
+                                    // Walk ~30 blocks in a random direction
+                                    const angle = Math.random() * 2 * Math.PI;
+                                    const walkX = Math.round(p.x + Math.cos(angle) * 30);
+                                    const walkZ = Math.round(p.z + Math.sin(angle) * 30);
+                                    await walkSkill({ x: walkX, z: walkZ, range: 5 });
                                     console.log(`[Agent] Arrived at (${Math.round(this.bot.entity?.position?.x)}, ${Math.round(this.bot.entity?.position?.z)})`);
                                 }
                             } else {
@@ -422,6 +432,10 @@ export class Agent extends EventEmitter {
 
                         try {
                             for (let i = 0; i < settings._taskSteps.length; i++) {
+                                if (!this.bot?.entity) {
+                                    console.error(`[Agent] Bot disconnected — stopping grind at step ${i + 1}`);
+                                    break;
+                                }
                                 const step = settings._taskSteps[i];
                                 if (!step || !step.skill) {
                                     console.log(`[Agent] Step ${i + 1}: invalid, skipping`);
@@ -436,12 +450,17 @@ export class Agent extends EventEmitter {
                                 try {
                                     const SkillFn = this.taskRunner.skills[step.skill];
                                     if (SkillFn) {
-                                        await SkillFn(step.params || {});
+                                        const result = await SkillFn(step.params || {});
+                                        if (result === false) {
+                                            console.warn(`[Agent] Step ${i + 1} returned false (failed)`);
+                                        } else if (result === true) {
+                                            console.log(`[Agent] Step ${i + 1} succeeded`);
+                                        }
                                     } else {
                                         console.warn(`[Agent] Unknown skill: ${step.skill}`);
                                     }
                                 } catch (stepErr) {
-                                    console.warn(`[Agent] Step ${i + 1} failed: ${stepErr.message}`);
+                                    console.warn(`[Agent] Step ${i + 1} threw: ${stepErr.message}`);
                                 }
                                 // Log skill output
                                 if (this.bot.output && this.bot.output.length > outputBefore) {
@@ -485,6 +504,29 @@ export class Agent extends EventEmitter {
         console.log('[CHAT] queued for generation from', username);
         this._messageQueue.push({ username, message, key, ts: now });
         this._processQueue();
+    }
+ 
+    _syncServerAnalyzerKnowledgeToMemory() {
+        if (!this.brain?.memory || !this.serverAnalyzer?.kb) return;
+        const memory = this.brain.memory;
+        const commands = this.serverAnalyzer.kb.get('commands') || {};
+        for (const [command, meta] of Object.entries(commands)) {
+          memory.rememberServerCommand(command, { ...meta, source: 'serverAnalyzer' });
+        }
+        const npcs = this.serverAnalyzer.kb.get('npcs') || [];
+        const position = this.bot.entity?.position;
+        for (const npc of npcs) {
+          memory.rememberNPC(npc.name, npc.position || position, npc.type || 'npc', `Observed NPC from server analyzer`, npc.confidence || 0.6);
+        }
+        const guiMenus = this.serverAnalyzer.kb.get('guiMenus') || [];
+        for (const gui of guiMenus.slice(-10)) {
+          if (!position) continue;
+          memory.rememberWaypoint({
+            name: gui.title || 'Server GUI', type: 'gui', position,
+            tags: ['gui', 'server'], note: `Observed ${gui.itemCount || 0} items in ${gui.title || 'a server GUI'}`,
+            source: 'serverAnalyzer', confidence: 0.55,
+          });
+        }
     }
 
     async _processQueue() {
@@ -588,22 +630,27 @@ export class Agent extends EventEmitter {
             if (convoManager.isOtherAgent(username)) return;
 
             // [AyushiOS] Fast-path: BrocaArea handles known chat patterns instantly
-            if (this.brain && this.brain.broca && !message.startsWith('!')) {
-                this.brain.broca.handleIncomingChat(username, message);
-            }
+            const handledByBroca = this.brain?.broca && !message.startsWith('!')
+                ? this.brain.broca.handleIncomingChat(username, message)
+                : false;
 
             let translation = await handleEnglishTranslation(message);
             if (this.serverAnalyzer) {
                 this.serverAnalyzer.onChatMessage(translation);
                 if (username === MASTER_PLAYER) this.serverAnalyzer.setOwner(username);
+                if (this.brain?.memory) this._syncServerAnalyzerKnowledgeToMemory();
             }
             if (this.relationshipManager) {
                 this.relationshipManager.recordMessage(username, translation);
             }
+            if (this.brain?.memory) {
+                this.brain.memory.updatePlayerRelationship(username, 0, 'chatted');
+            }
             if (this.knowledgeGraph) {
                 this.knowledgeGraph.learnTriple(username, 'chatted_with', this.name);
             }
-            this._enqueueMessage(username, translation);
+            // Fast-path dialogue has already replied; do not also queue an LLM response.
+            if (!handledByBroca) this._enqueueMessage(username, translation);
         }
 
         this.respondFunc = respondFunc;
@@ -686,10 +733,13 @@ export class Agent extends EventEmitter {
         };
 
         this.bot.on('messagestr', (message) => {
-            if (this.serverAnalyzer) this.serverAnalyzer.onChatMessage(message);
+            if (this.serverAnalyzer) {
+                this.serverAnalyzer.onChatMessage(message);
+                if (this.brain?.memory) this._syncServerAnalyzerKnowledgeToMemory();
+            }
             handleRawMessage('messagestr', message);
         });
-
+ 
         // Mineflayer 4.x systemChat fallback
         this.bot.on('systemChat', (msg) => {
             if (typeof msg === 'string') {
@@ -697,9 +747,43 @@ export class Agent extends EventEmitter {
                 this.bot.emit('messagestr', msg);
             }
         });
-
+ 
+        this.bot.on('windowOpen', (window) => {
+            if (this.serverAnalyzer) {
+                this.serverAnalyzer.onWindowOpen(window);
+                if (this.brain?.memory) {
+                    const pos = this.bot.entity?.position;
+                    this.brain.memory.rememberWaypoint({
+                        name: window?.title?.text || window?.title || 'GUI',
+                        type: 'gui',
+                        position: pos,
+                        tags: ['gui', 'server'],
+                        note: 'Observed server GUI',
+                        importance: 1,
+                        confidence: 0.5,
+                    });
+                    this._syncServerAnalyzerKnowledgeToMemory();
+                }
+            }
+        });
+ 
         // [AyushiOS] Raw packet interceptors — catch messages on any protocol version
         if (this.bot._client) {
+            // DEBUG: Log ALL packet names to identify chat packet type on this server
+            const knownChatPackets = new Set(['chat', 'playerChat', 'systemChat']);
+            const highFreq = new Set(['tick', 'position', 'update_attributes', 'entity_metadata', 'entity_velocity', 'entity_position', 'entity_move_look', 'entity_head_rotation', 'rel_entity_move', 'entity_equipment', 'entity_effect', 'remove_entity_effect', 'world_event', 'named_sound_effect', 'sound_effect', 'block_break_animation', 'block_action', 'block_update', 'explosion', 'spawn_entity', 'spawn_entity_living', 'spawn_entity_experience_orb', 'entity_destroy', 'entity_look', 'entity_tracking', 'entity_status', 'entity_teleport', 'animation', 'collect', 'keep_alive', 'time_update', 'set_slot', 'window_items', 'map_chunk', 'light_update', 'update_light', 'unload_chunk', 'multi_block_change', 'block_change', 'server_data', 'tags', 'sync_player_position']);
+            const onAnyPacket = (data, metadata) => {
+                const packetName = metadata?.name || typeof data === 'object' ? data?.name : null;
+                if (!packetName) return;
+                if (knownChatPackets.has(packetName)) {
+                    const raw = data?.plainMessage || data?.message || data?.formattedMessage || data?.text || '';
+                    const str = typeof raw === 'string' ? raw : (raw?.text || JSON.stringify(raw));
+                    console.log(`[PACKET:${packetName}] ${(str || '').replace(/§./g, '').substring(0, 200)}`);
+                } else if (!highFreq.has(packetName)) {
+                    console.log(`[PACKET:${packetName}]`);
+                }
+            };
+            // The protocol-specific listeners below handle chat without logging every packet.
             // 1.19+ systemChat packet (catches overlay/toast messages that mineflayer may skip)
             const onSystemChat = (packet) => {
                 if (!packet || !packet.message) return;
@@ -1121,7 +1205,15 @@ export class Agent extends EventEmitter {
                 this.bot.lastDamageTaken = prev_health - this.bot.health;
                 // track nearest player as potential attacker
                 const nearest = this.bot.nearestEntity(e => e.type === 'player' && e.username !== this.bot.username && this.bot.entity.position.distanceTo(e.position) < 16);
-                if (nearest) this.bot.lastAttacker = nearest;
+                if (nearest) {
+                    this.bot.lastAttacker = nearest;
+                    const attacker = nearest.username || nearest.name;
+                    if (attacker) {
+                        this.relationshipManager?.recordEvent(attacker, 'attack');
+                        this.brain?.memory?.updatePlayerRelationship(attacker, -1, 'suspected nearby attacker');
+                        this.serverAnalyzer?.onPlayerAttack(attacker);
+                    }
+                }
                 if (this.emotionState) this.emotionState.applyEvent('damage');
                 if (this.memory_bank) {
                     this.memory_bank.addMemory(`Took ${(prev_health - this.bot.health).toFixed(1)} damage (HP: ${this.bot.health.toFixed(1)})`, { type: 'fact', importance: 0.6 });
@@ -1151,7 +1243,10 @@ export class Agent extends EventEmitter {
                 if (this.relationshipManager && jsonMsg.translate) {
                     // check if another player killed the bot
                     const killer = jsonMsg.with?.find(w => typeof w === 'object' && w.text)?.text;
-                    if (killer) this.relationshipManager.recordEvent(killer, 'attack');
+                    if (killer) {
+                        this.relationshipManager.recordEvent(killer, 'attack');
+                        this.brain?.memory?.updatePlayerRelationship(killer, -2, 'killed bot');
+                    }
                 }
                 let death_pos_text = null;
                 if (death_pos) {

@@ -4,6 +4,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { readFileSync, existsSync } from 'fs';
 import { TerminalConsole } from './src/console/TerminalConsole.js';
+import { safeJSON, safeReadJSON } from './src/utils/safe_json.js';
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('[FATAL] Unhandled Rejection at:', promise);
@@ -96,28 +97,30 @@ if (args.auth) {
 
 // these environment variables override certain settings
 if (process.env.MINECRAFT_PORT) {
-    settings.port = process.env.MINECRAFT_PORT;
+    settings.port = Number.parseInt(process.env.MINECRAFT_PORT, 10);
 }
 if (process.env.MINDSERVER_PORT) {
-    settings.mindserver_port = process.env.MINDSERVER_PORT;
+    settings.mindserver_port = Number.parseInt(process.env.MINDSERVER_PORT, 10);
 }
-if (process.env.PROFILES && JSON.parse(process.env.PROFILES).length > 0) {
-    settings.profiles = JSON.parse(process.env.PROFILES);
+const profilesEnv = safeJSON(process.env.PROFILES, []);
+if (profilesEnv.length > 0) {
+    settings.profiles = profilesEnv;
 }
 if (process.env.INSECURE_CODING) {
     settings.allow_insecure_coding = true;
 }
-if (process.env.BLOCKED_ACTIONS) {
-    settings.blocked_actions = JSON.parse(process.env.BLOCKED_ACTIONS);
+const blockedActions = safeJSON(process.env.BLOCKED_ACTIONS, null);
+if (blockedActions) {
+    settings.blocked_actions = blockedActions;
 }
 if (process.env.MAX_MESSAGES) {
-    settings.max_messages = process.env.MAX_MESSAGES;
+    settings.max_messages = Number.parseInt(process.env.MAX_MESSAGES, 10);
 }
 if (process.env.NUM_EXAMPLES) {
-    settings.num_examples = process.env.NUM_EXAMPLES;
+    settings.num_examples = Number.parseInt(process.env.NUM_EXAMPLES, 10);
 }
 if (process.env.LOG_ALL) {
-    settings.log_all_prompts = process.env.LOG_ALL;
+    settings.log_all_prompts = process.env.LOG_ALL === 'true' || process.env.LOG_ALL === '1';
 }
 if (process.env.SETTINGS_JSON) {
     try {
@@ -131,16 +134,17 @@ if (process.env.SETTINGS_JSON) {
 Mindcraft.init(false, settings.mindserver_port, settings.auto_open_ui);
 
 for (let profile of settings.profiles) {
-    const profile_json = JSON.parse(readFileSync(profile, 'utf8'));
+    const profile_json = safeReadJSON(() => readFileSync(profile, 'utf8'), {});
     settings.profile = profile_json;
     Mindcraft.createAgent(settings);
 }
 
 // Start terminal console
 if (settings.enable_terminal_console !== false) {
-    const agentName = settings.profiles.length > 0
-        ? JSON.parse(readFileSync(settings.profiles[0], 'utf8')).name || 'ayushi'
-        : 'ayushi';
+    const firstProfile = settings.profiles.length > 0
+        ? safeReadJSON(() => readFileSync(settings.profiles[0], 'utf8'), {})
+        : {};
+    const agentName = firstProfile.name || 'ayushi';
     const console_ = new TerminalConsole(agentName, settings.mindserver_port || 8080);
     setTimeout(() => {
         console_.start().catch(err => console.error('[Terminal] Console error:', err.message));

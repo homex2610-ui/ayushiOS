@@ -27,6 +27,15 @@ export class SensoryCortex {
       this.recentChat.push(entry);
       if (this.recentChat.length > 15) this.recentChat.shift();
       this.bus.emit('heard_speech', entry);
+
+      const commandMatch = message.match(/\/(spawn|hub|warp|rtp|kit|home|shop)(?:\s+([A-Za-z0-9_\-/]+))?/i);
+      if (commandMatch) {
+        const command = commandMatch[0].toLowerCase();
+        this.bus.emit('server_command_seen', { command, args: commandMatch[2] ?? null, username, source: 'chat' });
+        if (commandMatch[1].toLowerCase() === 'warp' && commandMatch[2]) {
+          this.bus.emit('warp_spotted', { name: commandMatch[2], position: null, note: `Mentioned in chat by ${username}` });
+        }
+      }
     });
   }
 
@@ -94,6 +103,7 @@ export class SensoryCortex {
       if (table) nearestWorkstation = { name: table.name, position: table.position };
     } catch (_) { /* pathfinder/world not loaded yet */ }
 
+    const currentPos = { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) };
     const snapshot = {
       timestamp: Date.now(),
       vitality: {
@@ -126,7 +136,7 @@ export class SensoryCortex {
       environment: {
         isNight: time.isNight || time.isThunderDay,
         isRaining: this.bot.isRaining ?? false,
-        position: { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) },
+        position: currentPos,
         dimension: this.bot.game?.dimension,
         nearestBed,
         nearestChest,
@@ -141,6 +151,37 @@ export class SensoryCortex {
       body: { inventory, equipped },
       recentChat: [...this.recentChat],
     };
+
+    if (nearestBed) {
+      this.bus.emit('landmark_spotted', {
+        name: nearestBed.name,
+        type: 'shelter',
+        position: nearestBed.position,
+        tags: ['bed', 'shelter'],
+        note: 'Nearby bed',
+        source: 'sensory',
+      });
+    }
+    if (nearestChest) {
+      this.bus.emit('landmark_spotted', {
+        name: nearestChest.name,
+        type: 'storage',
+        position: nearestChest.position,
+        tags: ['chest', 'storage'],
+        note: 'Nearby storage',
+        source: 'sensory',
+      });
+    }
+    if (nearestWorkstation) {
+      this.bus.emit('landmark_spotted', {
+        name: nearestWorkstation.name,
+        type: 'workstation',
+        position: nearestWorkstation.position,
+        tags: ['workstation', 'utility'],
+        note: 'Nearby workstation',
+        source: 'sensory',
+      });
+    }
 
     this.bus.emit('perception', snapshot);
     return snapshot;

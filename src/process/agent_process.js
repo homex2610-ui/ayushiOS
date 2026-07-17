@@ -18,7 +18,7 @@ export class AgentProcess {
         this.count_id = count_id;
         this.running = true;
 
-        let args = ['--experimental-require-module', init_agent_path, this.name];
+        let args = [init_agent_path, this.name];
         args.push('-n', this.name);
         args.push('-c', count_id);
         if (load_memory)
