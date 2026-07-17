@@ -120,12 +120,12 @@ async function processQueue() {
                 });
                 player.on('error', async (err) => {
                     console.error('[TTS] ffplay error', err);
-                    try { await fs.unlink(tmpPath); } catch {}
+                    try { await fs.unlink(tmpPath); } catch (e) { console.warn('[TTS] cleanup error:', e.message); }
                     isSpeaking = false;
                     processQueue();
                 });
                 player.on('exit', async () => {
-                    try { await fs.unlink(tmpPath); } catch {}
+                    try { await fs.unlink(tmpPath); } catch (e) { console.warn('[TTS] cleanup error:', e.message); }
                     isSpeaking = false;
                     processQueue();
                 });

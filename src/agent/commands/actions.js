@@ -1,6 +1,10 @@
 import * as skills from '../library/skills.js';
+import * as world from '../library/world.js';
 import settings from '../settings.js';
 import convoManager from '../conversation.js';
+import { HubNavigator } from '../../connection/HubNavigator.js';
+import { executeThreeTasks } from '../tasks/three_tasks.js';
+import { TaskRunner } from '../TaskRunner.js';
 
 
 function runAsAction (actionFn, resume = false, timeout = -1) {
@@ -14,12 +18,14 @@ function runAsAction (actionFn, resume = false, timeout = -1) {
         }
 
         const actionFnWithAgent = async () => {
-            await actionFn(agent, ...args);
+            return await actionFn(agent, ...args);
         };
         const code_return = await agent.actions.runAction(`action:${actionLabel}`, actionFnWithAgent, { timeout, resume });
         if (code_return.interrupted && !code_return.timedout)
             return;
-        return code_return.message;
+        if (!code_return.success)
+            return false;
+        return code_return.actionResult !== undefined ? code_return.actionResult : code_return.message;
     }
 
     return wrappedAction;
@@ -273,7 +279,7 @@ export const actionsList = [
             'num': { type: 'int', description: 'The number of blocks to collect.', domain: [1, Number.MAX_SAFE_INTEGER] }
         },
         perform: runAsAction(async (agent, type, num) => {
-            await skills.collectBlock(agent.bot, type, num);
+            return await skills.collectBlock(agent.bot, type, num);
         }, false, 10) // 10 minute timeout
     },
     {
@@ -284,7 +290,7 @@ export const actionsList = [
             'num': { type: 'int', description: 'The number of times to craft the recipe. This is NOT the number of output items, as it may craft many more items depending on the recipe.', domain: [1, Number.MAX_SAFE_INTEGER] }
         },
         perform: runAsAction(async (agent, recipe_name, num) => {
-            await skills.craftRecipe(agent.bot, recipe_name, num);
+            return await skills.craftRecipe(agent.bot, recipe_name, num);
         })
     },
     {
@@ -301,6 +307,7 @@ export const actionsList = [
                     agent.cleanKill('Safely restarting to update inventory.');
                 }, 500);
             }
+            return success;
         })
     },
     {
@@ -330,7 +337,7 @@ export const actionsList = [
     },
     {
         name: '!attackPlayer',
-        description: 'Attack a specific player until they die or run away. Remember this is just a game and does not cause real life harm.',
+        description: 'Attack a specific player until they die or run away. Uses full PvP combat (strafe, shield, crit-jump, eat mid-fight).',
         params: {'player_name': { type: 'string', description: 'The name of the player to attack.'}},
         perform: runAsAction(async (agent, player_name) => {
             let player = agent.bot.players[player_name]?.entity;
@@ -338,7 +345,26 @@ export const actionsList = [
                 skills.log(agent.bot, `Could not find player ${player_name}.`);
                 return false;
             }
-            await skills.attackEntity(agent.bot, player, true);
+            await skills.fightPlayer(agent.bot, player);
+        })
+    },
+    {
+        name: '!pvp',
+        description: 'Attack the nearest player (PvP). Uses full combat: strafe, shield, crit-jump, eat mid-fight.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            let nearest = null, nearestDist = Infinity;
+            for (const [name, p] of Object.entries(agent.bot.players)) {
+                if (name === agent.name) continue;
+                if (!p.entity) continue;
+                const d = agent.bot.entity.position.distanceTo(p.entity.position);
+                if (d < nearestDist) { nearest = p.entity; nearestDist = d; }
+            }
+            if (!nearest) {
+                skills.log(agent.bot, 'No players nearby to fight.');
+                return false;
+            }
+            return await skills.fightPlayer(agent.bot, nearest);
         })
     },
     {
@@ -490,7 +516,7 @@ export const actionsList = [
         description: 'Digs down a specified distance. Will stop if it reaches lava, water, or a fall of >=4 blocks below the bot.',
         params: {'distance': { type: 'int', description: 'Distance to dig down', domain: [1, Number.MAX_SAFE_INTEGER] }},
         perform: runAsAction(async (agent, distance) => {
-            await skills.digDown(agent.bot, distance)
+            return await skills.digDown(agent.bot, distance);
         })
     },
     {
@@ -511,5 +537,239 @@ export const actionsList = [
         perform: runAsAction(async (agent, tool_name, target) => {
             await skills.useToolOn(agent.bot, tool_name, target);
         })
+    },
+    {
+        name: '!bowAttack',
+        description: 'Shoot arrows at the nearest player or mob using a bow.',
+        params: {'target_name': { type: 'string', description: 'Name of the target player/mob to shoot.' }},
+        perform: runAsAction(async (agent, target_name) => {
+            const target = agent.bot.players[target_name]?.entity || world.getNearestEntityWhere(agent.bot, e => e.name === target_name, 24);
+            if (!target) { skills.log(agent.bot, `Could not find ${target_name}.`); return false; }
+            await skills.bowAttack(agent.bot, target);
+        })
+    },
+    {
+        name: '!stripMine',
+        description: 'Strip mine forward for a set number of blocks.',
+        params: {'length': { type: 'int', description: 'How far to mine forward.', domain: [1, 100] }},
+        perform: runAsAction(async (agent, length) => {
+            await skills.stripMine(agent.bot, length);
+        })
+    },
+    {
+        name: '!buildShelter',
+        description: 'Build a quick emergency shelter using available materials.',
+        params: {'size': { type: 'int', description: 'Size of the shelter (default 5).', domain: [3, 10] }},
+        perform: runAsAction(async (agent, size=5) => {
+            await skills.buildShelter(agent.bot, size);
+        })
+    },
+    {
+        name: '!plantAndHarvest',
+        description: 'Harvest mature crops and optionally plant new seeds in a radius.',
+        params: {'seed_type': { type: 'string', description: 'Seed type to plant (e.g. wheat_seeds). Optional.' }},
+        perform: runAsAction(async (agent, seed_type) => {
+            return await skills.plantAndHarvest(agent.bot, seed_type || null);
+        })
+    },
+    {
+        name: '!cookAllFood',
+        description: 'Cook all raw food in a nearby furnace.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            await skills.cookAllFood(agent.bot);
+        })
+    },
+    {
+        name: '!organizeInventory',
+        description: 'Deposit all inventory items into the nearest chest.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            await skills.organizeInventory(agent.bot);
+        })
+    },
+    {
+        name: '!lightSurroundings',
+        description: 'Place torches in a radius to light up the area.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            await skills.lightSurroundings(agent.bot);
+        })
+    },
+    {
+        name: '!buildBridge',
+        description: 'Build a bridge in the direction you are looking.',
+        params: {'length': { type: 'int', description: 'How long the bridge should be.', domain: [1, 50] }},
+        perform: runAsAction(async (agent, length) => {
+            await skills.buildBridge(agent.bot, length);
+        })
+    },
+    {
+        name: '!harvestTrees',
+        description: 'Harvest all nearby trees (logs) within range.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            await skills.harvestNearbyTrees(agent.bot);
+        })
+    },
+    {
+        name: '!farmXP',
+        description: 'Kill nearby hostile mobs for experience.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            await skills.farmExperience(agent.bot);
+        })
+    },
+    {
+        name: '!goFishing',
+        description: 'Go fishing a number of times.',
+        params: {'casts': { type: 'int', description: 'Number of casts.', domain: [1, 20] }},
+        perform: runAsAction(async (agent, casts) => {
+            await skills.goFishing(agent.bot, casts);
+        })
+    },
+    {
+        name: '!breedAnimals',
+        description: 'Breed two animals of the given type.',
+        params: {'animal_type': { type: 'string', description: 'Type of animal to breed (cow, sheep, pig, chicken).' }},
+        perform: runAsAction(async (agent, animal_type) => {
+            await skills.breedAnimals(agent.bot, animal_type);
+        })
+    },
+    {
+        name: '!enchantItem',
+        description: 'Open an enchanting table with the given item.',
+        params: {'item_name': { type: 'string', description: 'Name of the item to enchant.' }},
+        perform: runAsAction(async (agent, item_name) => {
+            await skills.enchantItem(agent.bot, item_name);
+        })
+    },
+    {
+        name: '!buildPortal',
+        description: 'Build a nether portal (need 10 obsidian + flint/steel).',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            await skills.buildNetherPortal(agent.bot);
+        })
+    },
+    {
+        name: '!goToMode',
+        description: 'Navigate to a different game mode on the server (survival, pvp, practice, kitpvp, bedwars, skywars, lifesteal, minigame). Walks to mode NPCs/armor stands or uses commands.',
+        params: {
+            'mode': { type: 'string', description: 'Target game mode to navigate to.' }
+        },
+        perform: runAsAction(async (agent, mode) => {
+            const navigator = new HubNavigator(agent.bot);
+            const result = await navigator.navigateToMode(mode);
+            navigator.reset();
+            if (result) {
+                skills.log(agent.bot, `Successfully navigated to ${mode} mode.`);
+                return true;
+            }
+            skills.log(agent.bot, `Failed to navigate to ${mode} mode.`);
+            return false;
+        })
+    },
+    {
+        name: '!interactWithNPC',
+        description: 'Find and interact (right-click) with the nearest NPC matching the given name (shop, survival, pvp, quest, etc). Returns whether a GUI was opened.',
+        params: {
+            'name_or_trait': { type: 'string', description: 'NPC name to search for (e.g. "shop", "survival", "pvp", or a specific name).' }
+        },
+        perform: runAsAction(async (agent, name_or_trait) => {
+            const result = await skills.interactWithEntity(agent.bot, name_or_trait);
+            if (!result.success) return `Could not interact with "${name_or_trait}": ${result.reason}`;
+            if (result.window) return `Interacted with "${name_or_trait}" — GUI opened.`;
+            return `Interacted with "${name_or_trait}" — no GUI detected.`;
+        })
+    },
+    {
+        name: '!listNPCs',
+        description: 'List all detected NPCs on the server with their positions and traits.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            const analyzer = agent.serverAnalyzer;
+            if (!analyzer || !analyzer.npc) return 'NPC analyzer not available.';
+            const npcs = analyzer.kb.get('npcs') || [];
+            if (npcs.length === 0) return 'No NPCs detected yet. Scan is ongoing.';
+            const bot = agent.bot;
+            let res = 'DETECTED_NPCS';
+            for (const npc of npcs) {
+                const dist = bot.entity?.position ? Math.round(bot.entity.position.distanceTo({ x: npc.position.x, y: npc.position.y, z: npc.position.z })) : '?';
+                const traits = npc.traits?.length ? `[${npc.traits.join(', ')}]` : '';
+                res += `\n- ${npc.name} (${npc.type}) at ${npc.position.x},${npc.position.y},${npc.position.z} (${dist}m away) ${traits}`;
+            }
+            return res;
+        })
+    },
+    {
+        name: '!bt',
+        description: 'Toggle behavior tree AI on/off. Usage: !bt [on|off|status]',
+        perform: async (agent, arg) => {
+            if (arg === 'on' || arg === 'true') {
+                settings.bt_enabled = true;
+                return 'BT enabled';
+            }
+            if (arg === 'off' || arg === 'false') {
+                settings.bt_enabled = false;
+                if (agent.btCurrentTask) {
+                    agent.btCurrentTask.reset();
+                    agent.btCurrentTask = null;
+                }
+                agent.requestInterrupt();
+                return 'BT disabled';
+            }
+            return `BT is ${settings.bt_enabled ? 'ON' : 'OFF'} | decisions made: ${agent._btDecisionCount || 0}`;
+        },
+        params: {
+            arg: {
+                type: 'string',
+                description: '"on", "off", or "status" (default: "status")',
+                optional: true,
+            }
+        }
+    },
+    {
+        name: '!threeTasks',
+        description: 'Execute 3 tasks in sequence: (1) kill 3 players (PvP), (2) build wheat farm, (3) craft iron armor set.',
+        params: {},
+        perform: async function (agent) {
+            if (!agent.bot?.entity) return 'Bot not spawned yet.';
+            agent.actions.runAction('action:threeTasks', async () => {
+                try {
+                    const result = await executeThreeTasks(agent);
+                    return `Three tasks done! Kills: ${result.kills}/3, Farm: ${result.farmResult ? 'OK' : 'FAIL'}, Armor: ${result.armorResult ? 'OK' : 'FAIL'}`;
+                } catch (err) {
+                    console.error('[ThreeTasks] Fatal error:', err);
+                    return `Three tasks failed: ${err.message}`;
+                }
+            }).catch(err => console.error('[ThreeTasks] Action error:', err));
+        }
+    },
+    {
+        name: '!runTask',
+        description: 'Run a JSON-defined task from the tasks/ folder. Example: !runTask("three_tasks") or !runTask("master_survival")',
+        params: {
+            'taskName': { type: 'string', description: 'Name of the task file (without .json)' }
+        },
+        perform: async function (agent, taskName) {
+            if (!agent.bot?.entity) return 'Bot not spawned yet.';
+            const runner = agent.taskRunner || new TaskRunner(agent.bot);
+            return await agent.actions.runAction('action:runTask', async () => {
+                const result = await runner.runTaskFromFile(taskName);
+                if (result.success) return `Task "${taskName}" completed successfully!`;
+                return `Task "${taskName}" failed at step ${result.failedStep}: ${result.reason}`;
+            });
+        }
+    },
+    {
+        name: '!listTasks',
+        description: 'List all available JSON task files in the tasks/ folder.',
+        params: {},
+        perform: async function (agent) {
+            const tasks = TaskRunner.getAvailableTasks();
+            if (tasks.length === 0) return 'No task files found in tasks/ folder.';
+            return `Available tasks:\n${tasks.map(t => `  - ${t}`).join('\n')}\nRun with !runTask("taskName")`;
+        }
     },
 ];

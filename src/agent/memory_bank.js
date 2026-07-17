@@ -9,6 +9,7 @@ export class MemoryBank {
         this._idCounter = 0;
         this._dirty = false;
         this._lastPrune = 0;
+        this._lastSaveTime = 0;
         this._agent = null;
         this._load();
     }
@@ -165,6 +166,8 @@ export class MemoryBank {
 
     save() {
         if (!this._dirty) return;
+        if (this._lastSaveTime && Date.now() - this._lastSaveTime < 5000) return;
+        this._lastSaveTime = Date.now();
         try {
             const dir = `./bots/${this.name}`;
             mkdirSync(dir, { recursive: true });

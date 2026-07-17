@@ -1,6 +1,6 @@
 const settings = {
     "minecraft_version": "auto", // "auto" detects version; or set a specific version like "1.21.4"
-    "host": "play.driftsmp.net", // server IP: "localhost", "your.ip.address.here", or "play.example.com"
+    "host": "play.kryonmc.net", // server IP: "localhost", "your.ip.address.here", or "play.example.com"
     "port": 25565, // -1 auto-scans LAN; set specific port for servers (e.g. 25565)
     "auth": "offline", // "offline" for cracked servers / singleplayer LAN; "microsoft" for premium servers
     "password": "ayushi_ds_2026", // Password for auto-/register and /login (AuthMe, etc.)
@@ -29,7 +29,7 @@ const settings = {
 
     "load_memory": true, // load memory from previous session (continues where bot left off)
     "init_message": null, // sends to all on spawn (null = no message, avoids drawing attention)
-    "only_chat_with": [], // users that the bots listen to and send general messages to. if empty it will chat publicly
+    "only_chat_with": ["updesh"], // users that the bots listen to and send general messages to. if empty it will chat publicly
 
     "speak": false,
     // allows all bots to speak through text-to-speech. 
@@ -37,7 +37,7 @@ const settings = {
     // if set to "system" it will use basic system text-to-speech. 
     // Works on windows and mac, but linux requires you to install the espeak package through your package manager eg: `apt install espeak` `pacman -S espeak`.
 
-    "chat_ingame": true, // bot responses are shown in minecraft chat
+    "chat_ingame": false, // bot responses are shown in minecraft chat
     "language": "en", // translate to/from this language. Supports these language names: https://cloud.google.com/translate/docs/languages
     "render_bot_view": false, // show bot's view in browser at localhost:3000, 3001...
 
@@ -47,31 +47,56 @@ const settings = {
     "code_timeout_mins": -1, // minutes code is allowed to run. -1 for no timeout
     "relevant_docs_count": 5, // number of relevant code function docs to select for prompting. -1 for all
 
-    "max_messages": 6, // max number of messages to keep in context (reduced to save tokens)
-    "num_examples": 1, // number of examples to give to the model (reduced to save tokens)
+    "max_messages": 3, // max msgs in context (reduced to save tokens ~70%)
+    "num_examples": 0, // no examples (saves tokens)
     "max_commands": -1, // max number of commands that can be used in consecutive responses. -1 for no limit
     "show_command_syntax": "none", // "full", "shortened", or "none" — "none" hides all command text from chat
-    "narrate_behavior": false, // chat simple automatic actions ('Picking up item!')
+    "narrate_behavior": true, // chat simple automatic actions ('Picking up item!')
     "chat_bot_messages": true, // publicly chat messages to other bots
 
-    "spawn_timeout": 30, // num seconds allowed for the bot to spawn before throwing error. Increase when spawning takes a while.
-    "block_place_delay": 150, // delay between placing blocks (ms) — helps avoid anti-cheat kicks. 150ms mimics human reaction time.
+    "spawn_timeout": 60, // num seconds allowed for the bot to spawn before throwing error. Increase when spawning takes a while.
+    "block_place_delay": 300, // delay between placing blocks (ms) — helps avoid anti-cheat kicks. 150ms mimics human reaction time.
   
     "log_all_prompts": false, // log ALL prompts to file
 
     // Baby AI / Curiosity Engine
-    "enable_curiosity": false, // disabled to save tokens (bot explores and sets random goals)
-    "enable_deep_awareness": true, // bot tracks surroundings ($WORLD_AWARE)
+    "enable_curiosity": true, // enabled - learns from environment
+    "enable_deep_awareness": true, // enabled - world awareness
 
-    // Advanced Brain Systems
-    "enable_emotions": true, // internal emotion state influences decisions
-    "enable_goal_planner": false, // disabled to save tokens (autonomous goal generation every 2min)
-    "enable_relationships": false, // disabled to save tokens (track player relationships)
-    "enable_knowledge_graph": false, // disabled to save tokens (relational triple memory)
-    "enable_episodic_replay": false, // disabled to save tokens (memory consolidation every 25min)
-    "enable_reflection": false, // disabled to save tokens (hourly self-reflection)
-    "enable_skill_learning": false, // disabled to save tokens (learn new skills)
-    "enable_meta_learning": false, // disabled to save tokens (strategy improvement)
+    // Advanced Brain Systems — all enabled (no API cost, runs locally)
+    "enable_emotions": true,
+    "enable_goal_planner": true,
+    "enable_relationships": true,
+    "enable_knowledge_graph": true,
+    "enable_episodic_replay": true,
+    "enable_reflection": true,
+    "enable_skill_learning": true,
+    "enable_meta_learning": true,
+
+    // LLM — disable to run code-only (BT + intent pipeline + task queue only)
+    "enable_llm": false, // false = no LLM calls at all; relies on BT, intent pipeline, and canned responses
+
+    // Behavior Tree AI — replaces LLM per-tick decisions with utility scoring
+    "bt_enabled": true, // autonomous utility-AI behavior tree (overrides self_prompter/goal_planner)
+    "bt_log": false, // verbose BT decision logging
+
+    // Connection & World Management
+    "connection_prefer_lan": false, // skip LAN scan, go straight to configured SMP
+    "connection_auto_fallback": true, // fall back to public SMP if LAN unavailable
+    "connection_auto_reconnect": true, // auto reconnect on disconnect
+    "connection_auto_detect_hub": false, // disabled - connect directly, let bot work even in hub spawn
+
+    // Intent Pipeline
+    "enable_intent_pipeline": true, // use intent parser + task queue for 90% of requests
+    "enable_fast_reply": true, // instant 200-500ms acknowledgments
+    "enable_task_queue": true, // persistent task queue surviving restarts
+
+    // Terminal Console
+    "enable_terminal_console": true, // enable stdin terminal for bot control
+    "terminal_console_prefix": "/", // prefix for terminal commands
+
+    "enable_brain": true, // AyushiOS autonomous brain (need/emotion/personality system)
+    "auto_task": null, // handled via _taskSteps now
 
     "goal_plan_interval": 120000, // ms between autonomous plan cycles
     "episodic_replay_interval": 1500000, // ms between memory consolidation (~25min)

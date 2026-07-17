@@ -14,16 +14,18 @@ export class SkillLibrary {
         const skillDocs = getSkillDocs();
         this.skill_docs = skillDocs;
         if (this.embedding_model) {
-            try {
-                const embeddingPromises = skillDocs.map((doc) => {
-                    return (async () => {
-                        let func_name_desc = doc.split('\n').slice(0, 2).join('');
-                        this.skill_docs_embeddings[doc] = await this.embedding_model.embed(func_name_desc);
-                    })();
-                });
-                await Promise.all(embeddingPromises);
-            } catch (error) {
-                console.warn('Error with embedding model, using word-overlap instead.');
+            const embeddingPromises = skillDocs.map(async (doc) => {
+                try {
+                    let func_name_desc = doc.split('\n').slice(0, 2).join('');
+                    this.skill_docs_embeddings[doc] = await this.embedding_model.embed(func_name_desc);
+                } catch {
+                    // individual embed failure is non-fatal
+                }
+            });
+            await Promise.all(embeddingPromises);
+            const successCount = Object.keys(this.skill_docs_embeddings).length;
+            if (successCount < skillDocs.length / 2) {
+                console.warn(`Only ${successCount}/${skillDocs.length} embeddings succeeded, falling back to word-overlap.`);
                 this.embedding_model = null;
             }
         }

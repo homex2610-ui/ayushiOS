@@ -318,7 +318,7 @@ export function getPosition(bot) {
      * let position = world.getPosition(bot);
      * let x = position.x;
      **/
-    return bot.entity.position;
+    return bot.entity?.position || { x: 0, y: 0, z: 0 };
 }
 
 

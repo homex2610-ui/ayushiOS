@@ -75,7 +75,7 @@ export class WorldKnowledge {
             try {
                 const block = bot.findBlock({ point: bot.entity.position, matching: b => b.name === `${color}_wool`, maxDistance: 12, count: 1 });
                 if (block) found.push(color);
-            } catch (_) {}
+            } catch (err) { console.warn('[WorldKnowledge] _nearbyWool:', err.message); }
             if (found.length >= 6) break;
         }
         return found;
@@ -87,7 +87,7 @@ export class WorldKnowledge {
             try {
                 const block = bot.findBlock({ point: bot.entity.position, matching: b => b.name === name, maxDistance: 16, count: 1 });
                 if (block) results.push(name);
-            } catch (_) {}
+            } catch (err) { console.warn('[WorldKnowledge] _interestingBlocks:', err.message); }
         }
         return results;
     }

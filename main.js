@@ -2,7 +2,17 @@ import * as Mindcraft from './src/mindcraft/mindcraft.js';
 import settings from './settings.js';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { TerminalConsole } from './src/console/TerminalConsole.js';
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[FATAL] Unhandled Rejection at:', promise);
+    console.error('[FATAL] Reason:', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (err, origin) => {
+    console.error('[FATAL] Uncaught Exception:', err.stack || err);
+    console.error('[FATAL] Origin:', origin);
+});
 
 function parseArguments() {
     return yargs(hideBin(process.argv))
@@ -42,11 +52,35 @@ if (args.profiles) {
 if (args.task_path) {
     let tasks = JSON.parse(readFileSync(args.task_path, 'utf8'));
     if (args.task_id) {
-        settings.task = tasks[args.task_id];
-        settings.task.task_id = args.task_id;
+        if (tasks[args.task_id]) {
+            settings.task = tasks[args.task_id];
+            settings.task.task_id = args.task_id;
+        } else {
+            // task_id might be an array index if tasks is an array
+            const idx = parseInt(args.task_id);
+            if (!isNaN(idx) && Array.isArray(tasks) && tasks[idx]) {
+                settings.task = { steps: tasks, task_id: args.task_id };
+            }
+        }
+    } else {
+        // If no task_id but task_path is provided, treat the whole file as steps
+        if (Array.isArray(tasks)) {
+            settings.task = { steps: tasks, task_id: 'default' };
+        }
     }
-    else {
-        throw new Error('task_id is required when task_path is provided');
+}
+
+// Auto-load diamond_grind task if no task specified
+if (!settings.task && existsSync('./tasks/diamond_grind.json')) {
+    try {
+        const tasks = JSON.parse(readFileSync('./tasks/diamond_grind.json', 'utf8'));
+        if (Array.isArray(tasks)) {
+            settings._taskSteps = tasks;
+            settings.task = null; // Don't use Task class - we'll use TaskRunner directly
+            console.log(`[Main] Auto-loaded diamond_grind task (${tasks.length} steps)`);
+        }
+    } catch (err) {
+        console.warn('[Main] Failed to auto-load task:', err.message);
     }
 }
 
@@ -100,4 +134,15 @@ for (let profile of settings.profiles) {
     const profile_json = JSON.parse(readFileSync(profile, 'utf8'));
     settings.profile = profile_json;
     Mindcraft.createAgent(settings);
+}
+
+// Start terminal console
+if (settings.enable_terminal_console !== false) {
+    const agentName = settings.profiles.length > 0
+        ? JSON.parse(readFileSync(settings.profiles[0], 'utf8')).name || 'ayushi'
+        : 'ayushi';
+    const console_ = new TerminalConsole(agentName, settings.mindserver_port || 8080);
+    setTimeout(() => {
+        console_.start().catch(err => console.error('[Terminal] Console error:', err.message));
+    }, 5000);
 }

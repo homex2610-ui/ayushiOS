@@ -49,7 +49,7 @@ export function commandExists(commandName) {
  * */
 function parseBoolean(input) {
     switch(input.toLowerCase()) {
-        case 'false': //These are interpreted as flase;
+        case 'false': //These are interpreted as false;
         case 'f':
         case '0':
         case 'off':
@@ -110,8 +110,9 @@ export function parseCommandMessage(message) {
     const params = commandParams(command);
     const paramNames = commandParamNames(command);
     
-    if (args.length !== params.length)
-        return `Command ${command.name} was given ${args.length} args, but requires ${params.length} args.`;
+    const requiredCount = params.filter(p => !p.optional).length;
+    if (args.length < requiredCount || args.length > params.length)
+        return `Command ${command.name} was given ${args.length} args, but requires ${requiredCount} args.`;
 
     
     for (let i = 0; i < args.length; i++) {

@@ -6,8 +6,8 @@ import convoManager from './conversation.js';
 
 async function say(agent, message) {
     agent.bot.modes.behavior_log += message + '\n';
-    if (agent.shut_up || !settings.narrate_behavior) return;
-    agent.openChat(message);
+    // Don't send public chat — server kicks for "advertising / repeated spam"
+    console.log(`[Modes] ${message}`);
 }
 
 // a mode is a function that is called every tick to respond immediately to the world
@@ -174,7 +174,7 @@ const modes_list = [
     },
     {
         name: 'pvp',
-        description: 'Retaliate against players who attack you.',
+        description: 'God-level PvP retaliation. Strafes, crit-jumps, uses shield, eats mid-fight.',
         interrupts: ['all'],
         on: true,
         active: false,
@@ -184,12 +184,9 @@ const modes_list = [
                 agent.bot.lastAttacker = null;
                 return;
             }
-            if (attacker && agent.bot.entity.position.distanceTo(attacker.position) < 24) {
+            if (attacker && attacker.isValid && attacker.health > 0 && agent.bot.entity.position.distanceTo(attacker.position) < 24) {
                 execute(this, agent, async () => {
-                    await skills.equipHighestAttack(agent.bot);
-                    agent.bot.pvp.attack(attacker);
-                    await new Promise(r => setTimeout(r, 5000));
-                    agent.bot.pvp.stop();
+                    await skills.fightPlayer(agent.bot, attacker);
                 });
             }
         }
@@ -376,6 +373,48 @@ const modes_list = [
         }
     },
     {
+        name: 'auto_survival',
+        description: 'Auto-eat when hungry, equip armor, sleep at night.',
+        interrupts: [],
+        on: true,
+        active: false,
+        last_eat: 0,
+        last_equip: 0,
+        last_sleep_check: 0,
+        update: async function (agent) {
+            const bot = agent.bot;
+            if (!bot || !bot.entity) return;
+            const now = Date.now();
+
+            if (bot.food < 10 && now - this.last_eat > 8000) {
+                const food = bot.inventory.items().find(item =>
+                    item.foodPoints > 0 && !['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'chicken'].includes(item.name)
+                );
+                if (food && agent.isIdle()) {
+                    this.last_eat = now;
+                    await bot.equip(food, 'hand');
+                    await bot.consume();
+                }
+            }
+
+            if (now - this.last_equip > 15000 && agent.isIdle()) {
+                this.last_equip = now;
+                try { bot.armorManager.equipAll(); } catch (_) {}
+            }
+
+            if (now - this.last_sleep_check > 30000 && agent.isIdle()) {
+                this.last_sleep_check = now;
+                const time = bot.time.timeOfDay;
+                if (time > 13000 && time < 23000) {
+                    const bed = bot.findBlock({ matching: b => b.name.includes('bed'), maxDistance: 8, count: 1 });
+                    if (bed) {
+                        try { await bot.sleep(bed); } catch (_) {}
+                    }
+                }
+            }
+        }
+    },
+    {
         name: 'cheat',
         description: 'Use cheats to instantly place blocks and teleport.',
         interrupts: [],
@@ -385,29 +424,38 @@ const modes_list = [
     }
 ];
 
+let _lastInterruptedAction = '';
+let _lastInterruptTime = 0;
+
 async function execute(mode, agent, func, timeout=-1) {
     if (agent.self_prompter.isActive())
         await agent.self_prompter.stopLoop();
     let interrupted_action = agent.actions.currentActionLabel;
+    const now = Date.now();
     mode.active = true;
     let code_return = await agent.actions.runAction(`mode:${mode.name}`, async () => {
         await func();
     }, { timeout });
     mode.active = false;
-    console.log(`Mode ${mode.name} finished executing, code_return: ${code_return.message}`);
 
     let should_reprompt = 
-        interrupted_action && // it interrupted a previous action
-        !agent.actions.resume_func && // there is no resume function
-        !agent.self_prompter.isActive() && // self prompting is not on
-        !code_return.interrupted; // this mode action was not interrupted by something else
+        interrupted_action &&
+        !agent.actions.resume_func &&
+        !agent.self_prompter.isActive() &&
+        !code_return.interrupted &&
+        !(interrupted_action === _lastInterruptedAction && now - _lastInterruptTime < 30000);
 
-    if (should_reprompt) {
-        // auto prompt to respond to the interruption
+    _lastInterruptedAction = interrupted_action;
+    _lastInterruptTime = now;
+
+    if (should_reprompt && !interrupted_action.startsWith('action:!goTo') && !interrupted_action.startsWith('action:!follow')) {
         let role = convoManager.inConversation() ? agent.last_sender : 'system';
         let logs = agent.bot.modes.flushBehaviorLog();
-        agent.handleMessage(role, `(AUTO MESSAGE)Your previous action '${interrupted_action}' was interrupted by ${mode.name}.
-        Your behavior log: ${logs}\nRespond accordingly.`);
+        try {
+            await agent.handleMessage(role, `(AUTO MESSAGE)Your previous action '${interrupted_action}' was interrupted by ${mode.name}. Your behavior log: ${logs}\nRespond accordingly.`);
+        } catch (err) {
+            console.warn('[Mode] Auto-reprompt failed:', err.message);
+        }
     }
 }
 
@@ -441,12 +489,14 @@ class ModeController {
     }
 
     pause(mode_name) {
-        modes_map[mode_name].paused = true;
+        const mode = modes_map[mode_name];
+        if (!mode) return;
+        mode.paused = true;
     }
 
     unpause(mode_name) {
         const mode = modes_map[mode_name];
-        //if  unpause func is defined and mode is currently paused
+        if (!mode) return;
         if (mode.unpause && mode.paused) {
             mode.unpause();
         }
@@ -482,10 +532,16 @@ class ModeController {
         if (_agent.isIdle()) {
             this.unPauseAll();
         }
+        const start = Date.now();
         for (let mode of modes_list) {
+            if (Date.now() - start > 100) break;
             let interruptible = mode.interrupts.some(i => i === 'all') || mode.interrupts.some(i => i === _agent.actions.currentActionLabel);
             if (mode.on && !mode.paused && !mode.active && (_agent.isIdle() || interruptible)) {
-                await mode.update(_agent);
+                try {
+                    await mode.update(_agent);
+                } catch (e) {
+                    console.warn(`[Mode] ${mode.name} update error:`, e.message);
+                }
             }
             if (mode.active) break;
         }
@@ -511,6 +567,38 @@ class ModeController {
                 mode.on = json[mode.name];
             }
         }
+    }
+
+    registerMode(modeObj) {
+        if (!modeObj || !modeObj.name) {
+            console.warn('[ModeController] Cannot register mode without name');
+            return;
+        }
+        if (modes_map[modeObj.name]) {
+            console.warn(`[ModeController] Mode "${modeObj.name}" already registered, skipping`);
+            return;
+        }
+        const mode = {
+            name: modeObj.name,
+            description: modeObj.description || modeObj.name,
+            interrupts: modeObj.interrupts || [],
+            on: modeObj.on !== undefined ? modeObj.on : true,
+            active: false,
+            paused: false,
+            update: async function(agent) {
+                if (modeObj.on && !this.paused && !this.active) {
+                    try {
+                        if (typeof modeObj.update === 'function') {
+                            await modeObj.update(agent);
+                        }
+                    } catch (e) {
+                        console.warn(`[ModeController] Mode "${modeObj.name}" update error: ${e.message}`);
+                    }
+                }
+            }
+        };
+        modes_list.unshift(mode);
+        modes_map[modeObj.name] = mode;
     }
 }
 

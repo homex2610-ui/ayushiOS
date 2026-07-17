@@ -7,6 +7,12 @@ import settings from "../../../settings.js";
 const blockPlaceDelay = settings.block_place_delay == null ? 0 : settings.block_place_delay;
 const useDelay = blockPlaceDelay > 0;
 
+function pos(bot) {
+    const p = bot.entity.position;
+    if (!p || typeof p.floored === 'function') return p;
+    return new Vec3(p.x, p.y, p.z);
+}
+
 export function log(bot, message) {
     bot.output += message + '\n';
 }
@@ -16,7 +22,10 @@ async function autoLight(bot) {
         try {
             const pos = world.getPosition(bot);
             return await placeBlock(bot, 'torch', pos.x, pos.y, pos.z, 'bottom', true);
-        } catch (err) {return false;}
+        } catch (err) {
+            console.warn('[AutoLight]', err.message);
+            return false;
+        }
     }
     return false;
 }
@@ -31,6 +40,89 @@ export async function equipHighestAttack(bot) {
     let weapon = weapons[0];
     if (weapon)
         await bot.equip(weapon, 'hand');
+}
+
+export async function equipShield(bot) {
+    let shield = bot.inventory.findInventoryItem('shield');
+    if (shield) {
+        await bot.equip(shield, 'off-hand');
+    }
+}
+
+export async function eatBestFood(bot) {
+    const foods = bot.inventory.items().filter(i => i.foodPoints > 0 && i.name !== 'rotten_flesh' && i.name !== 'spider_eye' && i.name !== 'poisonous_potato').sort((a, b) => b.foodPoints - a.foodPoints);
+    if (foods.length > 0) {
+        await bot.equip(foods[0], 'hand');
+        await bot.consume();
+    }
+}
+
+export async function sprint(bot, sprinting) {
+    bot.setControlState('sprint', sprinting);
+}
+
+export async function strafeAround(bot, target, durationMs=2000) {
+    const start = Date.now();
+    let dir = 1;
+    while (Date.now() - start < durationMs) {
+        if (!target || !target.isValid || target.health <= 0) break;
+        bot.setControlState('left', dir === 1);
+        bot.setControlState('right', dir === 0);
+        bot.setControlState('forward', true);
+        if (bot.entity.position.distanceTo(target.position) > 3) {
+            bot.setControlState('sprint', true);
+        }
+        if (bot.entity.position.distanceTo(target.position) < 2) {
+            bot.setControlState('forward', false);
+            bot.setControlState('back', true);
+        }
+        dir = 1 - dir;
+        await new Promise(r => setTimeout(r, 300));
+        if (bot.interrupt_code) break;
+    }
+    bot.setControlState('left', false);
+    bot.setControlState('right', false);
+    bot.setControlState('forward', false);
+    bot.setControlState('back', false);
+}
+
+export async function fightPlayer(bot, target) {
+    await equipHighestAttack(bot);
+    await equipShield(bot);
+    await sprint(bot, true);
+    while (target && target.isValid && target.health > 0 && target.position) {
+        if (bot.interrupt_code) { await sprint(bot, false); return; }
+        const dist = bot.entity.position.distanceTo(target.position);
+        if (dist > 5) {
+            const goal = new pf.goals.GoalFollow(target, 3);
+            try { await goToGoal(bot, goal); } catch (e) { console.warn('[FightPlayer] path error:', e.message); }
+            continue;
+        }
+        if (dist <= 4) {
+            bot.lookAt(target.position.offset(0, 1, 0), true);
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 100));
+            await bot.attack(target);
+            bot.setControlState('jump', false);
+        }
+        if (bot.health < 8) {
+            await sprint(bot, false);
+            try {
+                const retreat = new pf.goals.GoalInvert(new pf.goals.GoalFollow(target, 8));
+                await goToGoal(bot, retreat);
+            } catch(e) { console.warn('[FightPlayer] retreat error:', e.message); }
+            if (bot.food < 18) {
+                await eatBestFood(bot);
+            }
+            await equipHighestAttack(bot);
+            await equipShield(bot);
+            await sprint(bot, true);
+        }
+        await new Promise(r => setTimeout(r, 300));
+    }
+    await sprint(bot, false);
+    bot.setControlState('jump', false);
+    log(bot, `Finished fighting ${target?.name || 'target'}.`);
 }
 
 export async function craftRecipe(bot, itemName, num=1) {
@@ -446,9 +538,6 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
     movements.dontMineUnderFallingBlock = false;
     movements.dontCreateFlow = true;
 
-    // Blocks to ignore safety for, usually next to lava/water
-    const unsafeBlocks = ['obsidian'];
-
     for (let i=0; i<num; i++) {
         let blocks = world.getNearestBlocksWhere(bot, block => {
             if (!blocktypes.includes(block.name)) {
@@ -462,11 +551,12 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 }
             }
             if (isLiquid) {
-                // collect only source blocks
                 return block.metadata === 0;
             }
-            
-            return movements.safeToBreak(block) || unsafeBlocks.includes(block.name);
+            if (block.hardness === undefined || block.hardness < 0) {
+                return false;
+            }
+            return true;
         }, 64, 1);
 
         if (blocks.length === 0) {
@@ -477,7 +567,11 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             break;
         }
         const block = blocks[0];
-        await bot.tool.equipForBlock(block);
+        try {
+            await bot.tool.equipForBlock(block);
+        } catch (e) {
+            log(bot, `Couldn't equip for ${blockType}: ${e}`);
+        }
         if (isLiquid) {
             const bucket = bot.inventory.findInventoryItem('bucket');
             if (!bucket) {
@@ -498,7 +592,10 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             }
             else if (mc.mustCollectManually(blockType)) {
                 await goToPosition(bot, block.position.x, block.position.y, block.position.z, 2);
-                await bot.dig(block);
+            const digTimeout = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Strip-mine dig timeout: ${block.name}`)), 15000)
+            );
+            await Promise.race([bot.dig(block), digTimeout]);
                 await pickupNearbyItems(bot);
                 success = true;
             }
@@ -597,7 +694,10 @@ export async function breakBlockAt(bot, x, y, z) {
                 return false;
             }
         }
-        await bot.dig(block, true);
+        const digTimeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Dig timeout: ${block.name} at ${block.position}`)), 15000)
+        );
+        await Promise.race([bot.dig(block, true), digTimeout]);
         log(bot, `Broke ${block.name} at x:${x.toFixed(1)}, y:${y.toFixed(1)}, z:${z.toFixed(1)}.`);
     }
     else {
@@ -989,10 +1089,16 @@ export async function consume(bot, itemName="") {
         return false;
     }
     await bot.equip(item, 'hand');
+    const foodBefore = bot.food;
     await bot.consume();
+    await new Promise(r => setTimeout(r, 500));
+    if (bot.food <= foodBefore && bot.food < 20) {
+        log(bot, `Warning: Food did not increase after consume (${foodBefore} -> ${bot.food}). May be in hub/lobby.`);
+    }
     log(bot, `Consumed ${item.name}.`);
     return true;
 }
+
 
 
 export async function giveToPlayer(bot, itemType, username, num=1) {
@@ -1423,7 +1529,7 @@ export async function moveAway(bot, distance) {
 
     await goToGoal(bot, inverted_goal);
     let new_pos = bot.entity.position;
-    log(bot, `Moved away from ${pos.floored()} to ${new_pos.floored()}.`);
+    log(bot, `Moved away from ${new Vec3(pos.x, pos.y, pos.z).floored()} to ${new Vec3(new_pos.x, new_pos.y, new_pos.z).floored()}.`);
     return true;
 }
 
@@ -1563,6 +1669,10 @@ export async function goToBed(bot) {
     await goToPosition(bot, loc.x, loc.y, loc.z);
     const bed = bot.blockAt(loc);
     await bot.sleep(bed);
+    if (!bot.isSleeping) {
+        log(bot, `Sleep failed — server denied sleep request.`);
+        return false;
+    }
     log(bot, `You are in bed.`);
     bot.modes.pause('unstuck');
     while (bot.isSleeping) {
@@ -1893,11 +2003,15 @@ function stringifyItem(bot, item) {
         if (Potion) text += ` of ${Potion.value.replace(/_/g, ' ').split(':')[1] || 'unknown type'}`;
         if (display) text += ` named ${display.value.Name.value}`;
         if (ench || StoredEnchantments) {
-            text += ` enchanted with ${(ench || StoredEnchantments).value.value.map((e) => {
-                const lvl = e.lvl.value;
-                const id = e.id.value;
-                return bot.registry.enchantments[id].displayName + ' ' + lvl;
-            }).join(' ')}`;
+            const enchants = (ench || StoredEnchantments).value?.value;
+            if (Array.isArray(enchants)) {
+                text += ` enchanted with ${enchants.map((e) => {
+                    const lvl = e.lvl?.value ?? 1;
+                    const id = e.id?.value;
+                    const enchName = bot.registry?.enchantments?.[id]?.displayName || `enchant_${id}`;
+                    return (enchName || 'unknown') + ' ' + lvl;
+                }).join(' ')}`;
+            }
         }
     }
     return text;
@@ -1955,6 +2069,8 @@ export async function digDown(bot, distance = 10) {
             log(bot, 'Failed to dig block at position:' + targetBlock.position);
             return false;
         }
+        // Human-like delay between blocks (anti-cheat)
+        await new Promise(r => setTimeout(r, 300 + Math.random() * 600));
     }
     log(bot, `Dug down ${distance} blocks.`);
     return true;
@@ -2151,4 +2267,452 @@ export async function jumpIntoBlock(bot, blockType, range = 128) {
 
     log(bot, `Jumped into ${blockType}!`);
     return true;
+}
+
+export async function bowAttack(bot, target) {
+    const bow = bot.inventory.findInventoryItem('bow');
+    if (!bow) { log(bot, 'No bow.'); return false; }
+    await bot.equip(bow, 'hand');
+    const arrow = bot.inventory.findInventoryItem('arrow');
+    if (!arrow) { log(bot, 'No arrows.'); return false; }
+    for (let i = 0; i < 5; i++) {
+        if (!target || !target.isValid) break;
+        await bot.lookAt(target.position.offset(0, 1, 0), true);
+        await bot.attack(target);
+        await new Promise(r => setTimeout(r, 600));
+        if (bot.interrupt_code) break;
+    }
+    return true;
+}
+
+export async function throwPotion(bot, potionType) {
+    const potion = bot.inventory.findInventoryItem(potionType || 'splash_potion');
+    if (!potion) { log(bot, `No ${potionType || 'splash_potion'}.`); return false; }
+    await bot.equip(potion, 'hand');
+    await bot.activateItem();
+    await new Promise(r => setTimeout(r, 500));
+    log(bot, `Threw ${potionType || 'potion'}.`);
+    return true;
+}
+
+export async function stripMine(bot, length=20, direction=null) {
+    if (!direction) direction = bot.entity.yaw;
+    const start = pos(bot).floored();
+    for (let i = 0; i < length; i++) {
+        const forward = new Vec3(-Math.sin(direction), 0, Math.cos(direction));
+        const pos = start.plus(forward.scaled(i));
+        const block = bot.blockAt(pos);
+        if (block && block.name !== 'air' && block.name !== 'cave_air' && block.name !== 'water' && block.name !== 'lava') {
+            try { await equipHighestAttack(bot); } catch (e) {}
+            try { await bot.dig(block); } catch (e) {}
+            try { await pickupNearbyItems(bot); } catch (e) {}
+            // Human-like delay between blocks (anti-cheat)
+            await new Promise(r => setTimeout(r, 200 + Math.random() * 400));
+        }
+        if (bot.interrupt_code) break;
+    }
+    log(bot, `Strip mined ${length} blocks.`);
+    return true;
+}
+
+export async function buildShelter(bot, size=5) {
+    const pos = pos(bot).floored();
+    const blocks = ['oak_planks', 'cobblestone', 'dirt'];
+    const inv = bot.inventory;
+    let mat = blocks.find(b => inv.count(b) >= (size*size*2 + size*4));
+    if (!mat) mat = blocks[blocks.length-1];
+    const floor = pos.offset(0, -1, 0);
+    for (let x = -1; x <= size; x++) {
+        for (let z = -1; z <= size; z++) {
+            await placeBlock(bot, mat, floor.x + x, floor.y, floor.z + z);
+            if (x === -1 || x === size || z === -1 || z === size)
+                for (let y = 1; y <= 3; y++)
+                    await placeBlock(bot, mat, floor.x + x, floor.y + y, floor.z + z);
+            if (bot.interrupt_code) break;
+        }
+        if (bot.interrupt_code) break;
+    }
+    for (let x = -1; x <= size; x++)
+        for (let z = -1; z <= size; z++)
+            await placeBlock(bot, mat, floor.x + x, floor.y + 4, floor.z + z);
+    await placeBlock(bot, 'oak_door', pos.x, pos.y, pos.z);
+    await placeBlock(bot, 'torch', pos.x, pos.y + 1, pos.z);
+    log(bot, `Built shelter at ${pos}.`);
+    return true;
+}
+
+export async function buildStaircase(bot, height=5, direction=null) {
+    const start = pos(bot).floored();
+    if (!direction) direction = bot.entity.yaw;
+    const forward = new Vec3(-Math.sin(direction), 0, Math.cos(direction));
+    const mat = bot.inventory.items().find(i => i.name.includes('planks') || i.name.includes('stone') || i.name === 'cobblestone');
+    if (!mat) { log(bot, 'No building material.'); return false; }
+    for (let i = 0; i < height; i++) {
+        const stepPos = start.plus(forward.scaled(i)).offset(0, i, 0);
+        await placeBlock(bot, mat.name, stepPos.x, stepPos.y, stepPos.z);
+        if (bot.interrupt_code) break;
+    }
+    return true;
+}
+
+export async function plantAndHarvest(bot, seedType=null, radius=4) {
+    const pos = pos(bot).floored();
+    let planted = 0;
+    for (let x = -radius; x <= radius; x++) {
+        for (let z = -radius; z <= radius; z++) {
+            const soil = bot.blockAt(pos.offset(x, -1, z));
+            if (!soil || soil.name !== 'farmland') continue;
+            const above = bot.blockAt(pos.offset(x, 0, z));
+            if (above && above.name.includes('age')) {
+                await breakBlockAt(bot, pos.x + x, pos.y, pos.z + z);
+                await pickupNearbyItems(bot);
+                planted++;
+            }
+            if (seedType) {
+                const seed = bot.inventory.findInventoryItem(seedType);
+                if (!seed) break;
+                await bot.equip(seed, 'hand');
+                await bot.placeBlock(above || soil, new Vec3(pos.x + x, pos.y, pos.z + z));
+            }
+            if (bot.interrupt_code) return planted > 0;
+        }
+    }
+    log(bot, `Harvested/planted ${planted} crops.`);
+    return planted > 0;
+}
+
+export async function breedAnimals(bot, animalType='cow') {
+    const wheat = bot.inventory.findInventoryItem('wheat');
+    if (!wheat) { log(bot, 'No wheat for breeding.'); return false; }
+    const animals = world.getNearbyEntities(bot, 12).filter(e => e.name === animalType);
+    if (animals.length < 2) { log(bot, `Not enough ${animalType}s nearby.`); return false; }
+    await bot.equip(wheat, 'hand');
+    for (const animal of animals.slice(0, 2)) {
+        if (bot.entity.position.distanceTo(animal.position) > 3) {
+            await goToPosition(bot, animal.position.x, animal.position.y, animal.position.z, 2);
+        }
+        await bot.useOn(animal);
+        await new Promise(r => setTimeout(r, 500));
+    }
+    log(bot, `Bred 2 ${animalType}s.`);
+    return true;
+}
+
+export async function organizeInventory(bot, chestType='chest') {
+    const chest = world.getNearestBlock(bot, chestType, 8);
+    if (!chest) { log(bot, 'No chest nearby.'); return false; }
+    await goToPosition(bot, chest.position.x, chest.position.y, chest.position.z, 2);
+    const items = bot.inventory.items().filter(i => i.slot < 36);
+    for (const item of items) {
+        try { await bot.transfer(item, chest, null); } catch(e) { console.warn('[Organize] Transfer failed:', e.message); }
+        if (bot.interrupt_code) break;
+    }
+    log(bot, 'Inventory organized.');
+    return true;
+}
+
+export async function buildNetherPortal(bot) {
+    const count = bot.inventory.count('obsidian');
+    if (count < 10) { log(bot, `Need 10 obsidian, have ${count}.`); return false; }
+    const lighter = bot.inventory.findInventoryItem('flint_and_steel') || bot.inventory.findInventoryItem('fire_charge');
+    if (!lighter) { log(bot, 'Need flint and steel or fire charge.'); return false; }
+    const pos = pos(bot).floored();
+    for (let x = 0; x <= 3; x++) {
+        for (let y = 0; y <= 4; y++) {
+            if (x === 0 || x === 3 || y === 0 || y === 4)
+                await placeBlock(bot, 'obsidian', pos.x + x, pos.y + y, pos.z);
+        }
+    }
+    await bot.equip(lighter, 'hand');
+    const inside = bot.blockAt(pos.offset(1, 1, 0));
+    if (inside) await bot.placeBlock(inside, pos.offset(1, 1, 0));
+    await bot.activateItem();
+    log(bot, 'Nether portal built.');
+    return true;
+}
+
+export async function mlgWaterBucket(bot) {
+    const bucket = bot.inventory.findInventoryItem('water_bucket');
+    if (!bucket) { log(bot, 'No water bucket.'); return false; }
+    if (bot.entity.velocity.y >= -0.5) return false;
+    await bot.equip(bucket, 'hand');
+    const below = bot.blockAt(bot.entity.position.offset(0, -2, 0));
+    await bot.placeBlock(below || bot.entity.position, bot.entity.position);
+    log(bot, 'MLG water bucket!');
+    return true;
+}
+
+export async function cookAllFood(bot) {
+    const furnace = world.getNearestBlock(bot, 'furnace', 8) || world.getNearestBlock(bot, 'blast_furnace', 8);
+    if (!furnace) { log(bot, 'No furnace nearby.'); return false; }
+    const foods = bot.inventory.items().filter(i => i.name.includes('raw_') || i.name === 'chicken' || i.name === 'beef' || i.name === 'porkchop' || i.name === 'mutton' || i.name === 'rabbit');
+    const fuel = bot.inventory.findInventoryItem('coal') || bot.inventory.findInventoryItem('charcoal') || bot.inventory.findInventoryItem('oak_log');
+    if (foods.length === 0) { log(bot, 'Nothing to cook.'); return false; }
+    if (!fuel) { log(bot, 'No fuel.'); return false; }
+    for (const food of foods) {
+        try { await bot.openFurnace(furnace); await bot.putInFurnace(food, food.count); await bot.putInFurnace(fuel, 1); } catch(e) { console.warn('[CookAll] error:', e.message); continue; }
+        if (bot.interrupt_code) break;
+    }
+    log(bot, `Cooking ${foods.length} foods.`);
+    return true;
+}
+
+export async function farmExperience(bot, range=16) {
+    const hostile = world.getNearbyEntities(bot, range).filter(e => e.name === 'zombie' || e.name === 'skeleton' || e.name === 'creeper' || e.name === 'spider');
+    if (hostile.length === 0) { log(bot, 'No mobs to farm.'); return false; }
+    for (const mob of hostile) {
+        await equipHighestAttack(bot);
+        await attackEntity(bot, mob, true);
+        if (bot.interrupt_code) break;
+    }
+    return true;
+}
+
+export async function repairItem(bot, itemName) {
+    const anvil = world.getNearestBlock(bot, 'anvil', 8) || world.getNearestBlock(bot, 'chipped_anvil', 8);
+    if (!anvil) { log(bot, 'No anvil nearby.'); return false; }
+    const item = bot.inventory.findInventoryItem(itemName);
+    if (!item) { log(bot, `No ${itemName}.`); return false; }
+    await goToPosition(bot, anvil.position.x, anvil.position.y, anvil.position.z, 2);
+    try { await bot.openAnvil(anvil); log(bot, 'Anvil opened.'); } catch(e) { log(bot, 'Could not open anvil.'); }
+    return true;
+}
+
+export async function shearSheep(bot) {
+    const shears = bot.inventory.findInventoryItem('shears');
+    if (!shears) { log(bot, 'No shears.'); return false; }
+    const sheep = world.getNearestEntityWhere(bot, e => e.name === 'sheep' && !e.sheared, 8);
+    if (!sheep) { log(bot, 'No unsheared sheep.'); return false; }
+    await bot.equip(shears, 'hand');
+    if (bot.entity.position.distanceTo(sheep.position) > 3)
+        await goToPosition(bot, sheep.position.x, sheep.position.y, sheep.position.z, 2);
+    await bot.useOn(sheep);
+    log(bot, 'Sheared sheep.');
+    return true;
+}
+
+export async function milkCow(bot) {
+    const bucket = bot.inventory.findInventoryItem('bucket');
+    if (!bucket) { log(bot, 'No bucket.'); return false; }
+    const cow = world.getNearestEntityWhere(bot, e => e.name === 'cow', 8);
+    if (!cow) { log(bot, 'No cow nearby.'); return false; }
+    await bot.equip(bucket, 'hand');
+    if (bot.entity.position.distanceTo(cow.position) > 3)
+        await goToPosition(bot, cow.position.x, cow.position.y, cow.position.z, 2);
+    await bot.useOn(cow);
+    log(bot, 'Got milk!');
+    return true;
+}
+
+export async function goFishing(bot, casts=5) {
+    const rod = bot.inventory.findInventoryItem('fishing_rod');
+    if (!rod) { log(bot, 'No fishing rod.'); return false; }
+    await bot.equip(rod, 'hand');
+    for (let i = 0; i < casts; i++) {
+        try {
+            await bot.fish();
+            await pickupNearbyItems(bot);
+        } catch(e) { console.warn('[Fish] cast error:', e.message); break; }
+        if (bot.interrupt_code) break;
+    }
+    return true;
+}
+
+export async function compostItems(bot) {
+    const composter = world.getNearestBlock(bot, 'composter', 8);
+    if (!composter) { log(bot, 'No composter.'); return false; }
+    const compostable = bot.inventory.items().filter(i => i.name.includes('wheat') || i.name.includes('seeds') || i.name.includes('leaves') || i.name.includes('sapling') || i.name.includes('flower') || i.name.includes('grass') || i.name === 'rotten_flesh');
+    if (compostable.length === 0) { log(bot, 'Nothing to compost.'); return false; }
+    await goToPosition(bot, composter.position.x, composter.position.y, composter.position.z, 2);
+    let done = 0;
+    for (const item of compostable.slice(0, 10)) {
+        try {
+            await bot.equip(item, 'hand');
+            await bot.placeBlock(composter, composter.position.offset(0, 1, 0));
+            done++;
+        } catch(e) { console.warn('[Compost] error:', e.message); continue; }
+        if (bot.interrupt_code) break;
+    }
+    log(bot, `Composted ${done} items.`);
+    return done > 0;
+}
+
+export async function lightSurroundings(bot, radius=8) {
+    const torches = bot.inventory.findInventoryItem('torch') || bot.inventory.findInventoryItem('soul_torch');
+    if (!torches) { log(bot, 'No torches.'); return false; }
+    const pos = pos(bot).floored();
+    let placed = 0;
+    for (let x = -radius; x <= radius; x += 3) {
+        for (let z = -radius; z <= radius; z += 3) {
+            const check = pos.offset(x, 0, z);
+            const block = bot.blockAt(check);
+            if (block && block.name === 'air' && block.light < 8) {
+                const below = bot.blockAt(check.offset(0, -1, 0));
+                if (below && below.name !== 'air' && below.name !== 'water' && below.name !== 'lava') {
+                    await placeBlock(bot, torches.name, check.x, check.y, check.z);
+                    placed++;
+                }
+            }
+            if (bot.interrupt_code) break;
+        }
+        if (bot.interrupt_code) break;
+    }
+    log(bot, `Placed ${placed} torches.`);
+    return placed > 0;
+}
+
+export async function buildBridge(bot, length=10, direction=null) {
+    const start = pos(bot).floored();
+    if (!direction) direction = bot.entity.yaw;
+    const forward = new Vec3(-Math.sin(direction), 0, Math.cos(direction));
+    const mat = bot.inventory.items().find(i => i.name.includes('planks') || i.name.includes('stone') || i.name === 'cobblestone');
+    if (!mat) { log(bot, 'No building material.'); return false; }
+    for (let i = 0; i < length; i++) {
+        const bridgePos = start.plus(forward.scaled(i)).offset(0, -1, 0);
+        if (bot.blockAt(bridgePos)?.name === 'air') {
+            await placeBlock(bot, mat.name, bridgePos.x, bridgePos.y, bridgePos.z);
+            if (i > 0 && i < length - 1) {
+                const left = bridgePos.plus(new Vec3(forward.z, 0, -forward.x));
+                const right = bridgePos.plus(new Vec3(-forward.z, 0, forward.x));
+                if (bot.blockAt(left)?.name === 'air') await placeBlock(bot, mat.name, left.x, left.y, left.z);
+                if (bot.blockAt(right)?.name === 'air') await placeBlock(bot, mat.name, right.x, right.y, right.z);
+            }
+        }
+        if (bot.interrupt_code) break;
+    }
+    return true;
+}
+
+export async function harvestNearbyTrees(bot, range=16) {
+    const logs = world.getNearbyBlocks(bot, 64, range).filter(b => b.name.includes('log') && bot.entity.position.distanceTo(b.position) < range);
+    if (logs.length === 0) { log(bot, 'No trees nearby.'); return false; }
+    let chopped = 0;
+    for (const log of logs) {
+        await goToPosition(bot, log.position.x, log.position.y, log.position.z, 4);
+        await breakBlockAt(bot, log.position.x, log.position.y, log.position.z);
+        chopped++;
+        await pickupNearbyItems(bot);
+        if (bot.interrupt_code || chopped > 20) break;
+    }
+    log(bot, `Chopped ${chopped} logs.`);
+    return chopped > 0;
+}
+
+export async function plantSaplings(bot, count=5) {
+    const sapling = bot.inventory.items().find(i => i.name.includes('sapling'));
+    if (!sapling) { log(bot, 'No saplings.'); return false; }
+    const pos = pos(bot).floored();
+    let planted = 0;
+    for (let i = 0; i < count; i++) {
+        const p = new Vec3(pos.x + Math.floor(Math.random()*5-2), pos.y, pos.z + Math.floor(Math.random()*5-2));
+        if (bot.blockAt(p)?.name === 'air' && bot.blockAt(p.offset(0, -1, 0))?.name !== 'air') {
+            await placeBlock(bot, sapling.name, p.x, p.y, p.z);
+            planted++;
+        }
+        if (bot.interrupt_code) break;
+    }
+    log(bot, `Planted ${planted} ${sapling.name}s.`);
+    return planted > 0;
+}
+
+export async function enchantItem(bot, itemName) {
+    const table = world.getNearestBlock(bot, 'enchanting_table', 8);
+    if (!table) { log(bot, 'No enchanting table.'); return false; }
+    const item = bot.inventory.findInventoryItem(itemName);
+    if (!item) { log(bot, `No ${itemName}.`); return false; }
+    const lapis = bot.inventory.findInventoryItem('lapis_lazuli');
+    if (!lapis) { log(bot, 'No lapis lazuli.'); return false; }
+    await goToPosition(bot, table.position.x, table.position.y, table.position.z, 2);
+    try { await bot.openEnchantmentTable(table); log(bot, 'Enchanting table opened.'); } catch(e) { log(bot, 'Could not open table.'); return false; }
+    return true;
+}
+
+export async function setBlock(bot, x, y, z, blockName) {
+    if (!bot.modes.isOn('cheat')) { log(bot, 'Cheat mode required.'); return false; }
+    bot.chat(`/setblock ${Math.floor(x)} ${Math.floor(y)} ${Math.floor(z)} ${blockName}`);
+    await new Promise(r => setTimeout(r, 200));
+    return true;
+}
+
+export async function giveSelf(bot, itemName, count=1) {
+    if (!bot.modes.isOn('cheat')) { log(bot, 'Cheat mode required.'); return false; }
+    bot.chat(`/give ${bot.username} ${itemName} ${count}`);
+    await new Promise(r => setTimeout(r, 200));
+    return true;
+}
+
+export async function teleportTo(bot, x, y, z) {
+    if (!bot.modes.isOn('cheat')) { log(bot, 'Cheat mode required.'); return false; }
+    bot.chat(`/tp ${bot.username} ${Math.floor(x)} ${Math.floor(y)} ${Math.floor(z)}`);
+    await new Promise(r => setTimeout(r, 500));
+    return true;
+}
+
+export async function spamRightClick(bot, times=5, delay=100) {
+    for (let i = 0; i < times; i++) {
+        bot.activateItem();
+        await new Promise(r => setTimeout(r, delay));
+        if (bot.interrupt_code) break;
+    }
+    return true;
+}
+
+export async function cureZombieVillager(bot) {
+    const potions = bot.inventory.items().filter(i => i.name.includes('splash_potion') && i.name.includes('weakness'));
+    const weakness = potions[0];
+    const apple = bot.inventory.findInventoryItem('golden_apple');
+    if (!weakness) { log(bot, 'Need weakness splash potion.'); return false; }
+    if (!apple) { log(bot, 'Need golden apple.'); return false; }
+    const zombie = world.getNearestEntityWhere(bot, e => e.name === 'zombie_villager', 8);
+    if (!zombie) { log(bot, 'No zombie villager nearby.'); return false; }
+    await bot.equip(weakness, 'hand');
+    if (bot.entity.position.distanceTo(zombie.position) > 4)
+        await goToPosition(bot, zombie.position.x, zombie.position.y, zombie.position.z, 3);
+    await bot.useOn(zombie);
+    await new Promise(r => setTimeout(r, 500));
+    await bot.equip(apple, 'hand');
+    if (bot.entity.position.distanceTo(zombie.position) > 4)
+        await goToPosition(bot, zombie.position.x, zombie.position.y, zombie.position.z, 3);
+    await bot.useOn(zombie);
+    log(bot, 'Cured zombie villager!');
+    return true;
+}
+
+export async function interactWithEntity(bot, entityName) {
+    const target = entityName.toLowerCase();
+    const entity = bot.nearestEntity(e =>
+        e.name?.toLowerCase() === target ||
+        e.username?.toLowerCase() === target ||
+        (e.displayName && e.displayName.toLowerCase() === target) ||
+        (e.metadata?.[2]?.toString?.().replace(/§./g, '').toLowerCase().trim() === target)
+    );
+    if (!entity) {
+        log(bot, `Can't see ${entityName} nearby.`);
+        return { success: false, reason: 'not_found' };
+    }
+    const dist = bot.entity.position.distanceTo(entity.position);
+    if (dist > 4) {
+        await goToPosition(bot, entity.position.x, entity.position.y, entity.position.z, 3);
+    }
+    await bot.lookAt(entity.position.offset(0, 1, 0));
+    await bot.waitForTicks(5);
+    try {
+        bot.activateEntity(entity);
+    } catch (e) {
+        try {
+            await bot.useOn(entity);
+        } catch (e2) {
+            return { success: false, reason: 'interact_failed', error: e2.message };
+        }
+    }
+    await bot.waitForTicks(5);
+    return new Promise(resolve => {
+        const timeout = setTimeout(() => {
+            resolve({ success: true, window: null, reason: 'interacted_no_gui' });
+        }, 1500);
+        bot.once('windowOpen', window => {
+            clearTimeout(timeout);
+            resolve({ success: true, window, reason: 'gui_opened' });
+        });
+    });
 }

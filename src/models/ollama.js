@@ -14,7 +14,7 @@ export class Ollama {
         let model = this.model_name || 'sweaterdog/andy-4:micro-q8_0';
         let messages = strictFormat(turns);
         messages.unshift({ role: 'system', content: systemMessage });
-        const maxAttempts = 5;
+        const maxAttempts = 2;
         let attempt = 0;
         let finalRes = null;
 
@@ -68,7 +68,7 @@ export class Ollama {
         return finalRes;
     }
 
-    async embed(text) {
+    async embed(text, timeoutMs = 10000) {
         const model = this.model_name || 'nomic-embed-text';
 
         const body = {
@@ -76,14 +76,12 @@ export class Ollama {
             input: text
         };
 
-        const res = await this.send(this.embedding_endpoint, body);
+        const res = await this.send(this.embedding_endpoint, body, timeoutMs);
 
-        // Ollama >= 0.31 returns "embeddings"
         if (res?.embeddings?.length) {
             return res.embeddings[0];
         }
 
-        // Older Ollama versions return "embedding"
         if (res?.embedding) {
             return res.embedding;
         }
@@ -91,22 +89,28 @@ export class Ollama {
         throw new Error("Embedding API returned no embedding.");
     }
 
-    async send(endpoint, body) {
+    async send(endpoint, body, timeoutMs = 120000) {
         const url = new URL(endpoint, this.url);
         let method = 'POST';
         let headers = new Headers();
-        const request = new Request(url, { method, headers, body: JSON.stringify(body) });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         let data = null;
         try {
-            const res = await fetch(request);
+            const res = await fetch(url, { method, headers, body: JSON.stringify(body), signal: controller.signal });
+            clearTimeout(timeoutId);
             if (res.ok) {
                 data = await res.json();
             } else {
                 throw new Error(`Ollama Status: ${res.status}`);
             }
         } catch (err) {
-            console.error('Failed to send Ollama request.');
-            console.error(err);
+            clearTimeout(timeoutId);
+            if (err.name === 'AbortError') {
+                console.error(`[Ollama] Request timed out after ${timeoutMs/1000}s`);
+            } else {
+                console.error('[Ollama] Request failed:', err.message);
+            }
         }
         return data;
     }

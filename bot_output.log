@@ -1,0 +1,506 @@
+[Main] Auto-loaded diamond_grind task (66 steps)
+[Connection] State: unknown -> connecting
+[Connection] Scanning for available servers...
+[ServerSelector] Selecting target server...
+[ServerSelector] Priority: Configured SMP > LAN World > Backup SMP
+[ServerSelector] Falling back to configured SMP: play.kryonmc.net:25565
+[Connection] Target selected: play.kryonmc.net:25565 (public)
+[Connection] State: connecting -> connecting
+[Terminal] Connected to MindServer on port 8080
+[36m[ayushi_ds_2026][0m > [Terminal] Console ready. Type "help" for commands.
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #1 — waiting 3.4s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #2 — waiting 5.0s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #3 — waiting 8.1s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #4 — waiting 9.1s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #5 — waiting 13.7s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 logged in!
+Initializing vision intepreter...
+[ServerAnalyzer] Starting server analysis...
+ayushi_ds_2026 updating available agents
+[AuthHandler] Authentication confirmed.
+ayushi_dsRestarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #7 — waiting 17.4s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+EPORT           ##
+########################################################
+
+=== [DEBUG: PLAYER HOTBAR] ===
+    Hotbar #0 (Slot 36): Empty
+    Hotbar #1 (Slot 37): Empty
+    Hotbar #2 (Slot 38): Empty
+    Hotbar #3 (Slot 39): Empty
+    Hotbar #4 (Slot 40): Empty
+    Hotbar #5 (Slot 41): Empty
+    Hotbar #6 (Slot 42): Empty
+    Hotbar #7 (Slot 43): Empty
+    Hotbar #8 (Slot 44): Empty
+==============================
+
+
+=== [DEBUG: SCOREBOARD] ===
+Sidebar objective: "untitled"
+=============================
+
+
+=== [DEBUG: ACTIVE BOSSBARS] ===
+No active bossbars.
+
+=== [DEBUG: NEARBY ENTITIES / NPCs] ===
+  - [PLAYER] Lifesteal | Dist: 40.8m | Pos: (-4, 121, 52)
+  - [PLAYER] parkour | Dist: 40.8m | Pos: (4, 121, 52)
+  - [PLAYER] advertise | Dist: 5.0m | Pos: (3, 131, 88)
+  - [PLAYER] store | Dist: 91.5m | Pos: (0, 124, 0)
+  - [PLAYER] vote | Dist: 87.4m | Pos: (5, 125, 4)
+  - [PLAYER] discord | Dist: 87.5m | Pos: (-5, 125, 4)
+  - [PLAYER] ayushi_ds_2026 | Dist: 0.0m | Pos: (0, 131, 91)
+========================================
+
+
+=== [DEBUG: CURRENT OPEN WINDOW] ===
+No active Container UI / Chest window open.
+########################################################
+
+########################################################
+
+[WorldDetector] Classifying world (attempt 1)...
+[WorldDetector] World classified as: survival (confidence: 15%, scoreboard: "none", gamemode: survival)
+[ConnectionAgent process exited with code 1 and signal null
+Restart #7 — waiting 16.3s before reconnecting...
+Restarting agent...
+Client connected
+Client connected
+Connecting to MindServer
+Client connected
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+Client connected
+ayushi_ds_2026 updating available agents
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+Client connected
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Client connected
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Client connected
+ayushi_ds_2026 updating available agents
+ble-stream\lib\internal\streams\readable.js:32ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #7 — waiting 15.5s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraayushi[AuthHandler] Loaded saved credentiayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+Agent process exited with code 1 and signal null
+Restart #7 — waiting 16.4s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+[Agent] Disconnected — auto-reconnect will handle reconnAgent process exited with code 1 and signal null
+Restart #8 — waiting 19.6s before reconnecting...
+] Players tracked: 5
+[ServerAnalyzer] Rules: 1
+[ServerAnalyzer] ================================
+[Ayushi OS] ✅ All systems online. ayushi_ds_2026 is awake.
+[AyushiOS] Brain booted — autonomous loop running (motor busy).
+[Agent] Will execute 66 task steps after 6460ms delay...
+ayushi_ds_2026 updating available agents
+[Agent] Starting diamond grind: 66 steps
+[Agent] Already away from spawn (0, 92), proceeding with grind
+[Agent] Step 1/66: chat({"message":"Starting survival grind! Goal: diamond armor + base + farm."})
+[TaskRunner] Starting survival grind! Goal: diamond armor + base + farm.
+[Agent] Step 2/66: collect({"item":"oak_log","count":8})
+  => No oak_log nearby to collect.
+Collected 0 oak_log.
+ayushi_ds_2026 updating available agents
+[Agent] Step 3/66: craft({"item":"oak_planks","count":32})
+  => You do not have the resources to craft a oak_planks. It requires: oak_logConnecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examp[Agent] Step 5/66: craft({"item":"crafting_table","count":1})
+  => [AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating av[Agent] Step 6/ayushi_ds_2026 logged in!
+Initializing vision intepreter...
+[ServerAnalyzer] Starting server analysis...
+ayushi_ds_2026 updating available agents
+[AuthHandler] Authentication confirmed.
+ayushi_ds_2026 spawned.
+[Connection] Bot spawned.
+[Connection] State: unknown -> proxy
+[Connection] Classifying world...
+ayushi_ds_2026 updating available agents
+[ServerAnalyzer] Boot phase 1: Chat listeners active
+
+########################################################
+##         RUNTIME ENVIRONMENT REPORT (INITIAL)       ##
+########################################################
+
+########################################################
+##               RUNTIME ENVIRONMENT REPORT           ##
+########################################################
+
+=== [DEBUG: PLAYER HOTBAR] ===
+    Hotbar #0 (Slot 36): Empty
+   [Agent] Step 11/66: collect({"item":"cobblestone","count":24})
+  => Don't have right tools to harvest cobblestone.
+[Agent] Step 12/66: go_surface({})
+y
+    Hotbar #6 (Slot 42): Empty
+    Hotbar #7 (Slot 43): Empty
+    Hotbar #8 (Slot 44): Empty
+==============================
+
+
+=== [DEBUG: SCOREBOARD] ===
+Sidebar objective: "untitled"
+=============================
+
+
+=== [DEBUG: ACTIVE BOSSBARS] ===
+No active bossbars.
+
+=== [DEBUG: NEARBY ENTITIES / NPCs] ===
+  - [PLAYER] store | Dist: 91.5m | Pos: (0, 124, 0)
+  - [PLAYER] discord | Dist: 87.5m | Pos: (-5, 125, 4)
+  - [PLAYER] Lifesteal | Dist: 40.8m | Pos: (-4, 121, 52)
+  - [PLAYER] vote | Dist: 87.4m | Pos: (5, 125, 4)
+  - [PLAYER] parkour | Dist: 40.8m | Pos: (4, 121, 52)
+  - [PLAYER] advertise | Dist: 5.0m | Pos: (3, 131, 88)
+  - [PLAYER] ayushi_ds_2026 | D[Agent] At (0, 131, 92). Trying to join survival via commands...
+=====
+
+
+=== [DEBUG: CURRENT OPEN WINDOW] ===
+No active Container UI / Chest window open.
+########################################################
+
+########################################################
+
+[WorldDetector] Classifying world (attempt 1)...
+[WorldDetector] World classified as: survival (confidence: 15%, scoreboard: "none", gamemode: survival)
+[Connection] Initial classification: survival (confidence: 15%)
+[Connection] State: proxy -> survival
+[Connection] Connected to survival world!
+[Connection] State: survival -> ready
+[Agent] Connection ready: world=survival, server=unknown
+[ServerCapabilities] Detecting server capabilities...
+[ServerCapabilities] Detected: break=null, compass=false, npcs=true, gui=undefined
+[Agent] Not in survival (gameMode=survival, state=ready). Attempting to join survival...
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+[Agent] Sent "/server survival", waiting 6s for position change...
+[Agent] Sent "/survival", waiting 6s for position change...
+[ServerAnalyzer] Boot phase 2: Command discovery running
+ocks, but reached a drop below the next block.
+[Agent] Step 11/66: collect({"item":"cobblestone","count":24})
+  => Don't have right tools to harvest cobblestone.
+[Agent] Step 12/66: go_surface({})
+ting available agents
+Agent process exited with code 1 and signal null
+Restart #6 — waiting 13.0s before reconnecting...
+Restarting agent...
+Connecting to MindServer
+ayushi_ds_2026 connected to MindServer
+Starting agent
+Initializing agent ayushi_ds_2026...
+[BTMemory] Loaded from ./bots/ayushi_ds_2026/bt_memory.json
+Examples initialized.
+No task.
+ayushi_ds_2026 logging into minecraft...
+[AuthHandler] Loaded saved credentials for ayushi_ds_2026.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 logged in!
+Initializing vision intepreter...
+[ServerAnalyzer] Starting server analysis...
+[AuthHandler] Authentication confirmed.
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 spawned.
+[Connection] Bot spawned.
+[Connection] State: unknown -> proxy
+[Connection] Classifying world...
+[ServerAnalyzer] Boot phase 1: Chat listeners active
+
+########################################################
+##         RUNTIME ENVIRONMENT REPORT (INITIAL)       ##
+########################################################
+
+########################################################
+##               RUNTIME ENVIRONMENT REPORT           ##
+########################################################
+
+=== [DEBUG: PLAYER HOTBAR] ===
+    Hotbar #0 (Slot 36): Empty
+    Hotbar #1 (Slot 37): Empty
+    Hotbar #2 (Slot 38): Empty
+    Hotbar #3 (Slot 39): Empty
+    Hotbar #4 (Slot 40): Empty
+    Hotbar #5 (Slot 41): Empty
+    Hotbar #6 (Slot 42): Empty
+    Hotbar #7 (Slot 43): Empty
+    Hotbar #8 (Slot 44): Empty
+==============================
+
+
+=== [DEBUG: SCOREBOARD] ===
+Sidebar objective: "untitled"
+=============================
+
+
+=== [DEBUG: ACTIVE BOSSBARS] ===
+No active bossbars.
+
+=== [DEBUG: NEARBY ENTITIES / NPCs] ===
+  - [PLAYER] store | Dist: 91.5m | Pos: (0, 124, 0)
+  - [PLAYER] discord | Dist: 87.5m | Pos: (-5, 125, 4)
+  - [PLAYER] Lifesteal | Dist: 40.8m | Pos: (-4, 121, 52)
+  - [PLAYER] vote | Dist: 87.4m | Pos: (5, 125, 4)
+  - [PLAYER] parkour | Dist: 40.8m | Pos: (4, 121, 52)
+  - [PLAYER] advertise | Dist: 5.0m | Pos: (3, 131, 88)
+  - [PLAYER] ayushi_ds_2026 | Dist: 0.0m | Pos: (0, 131, 91)
+========================================
+
+
+=== [DEBUG: CURRENT OPEN WINDOW] ===
+No active Container UI / Chest window open.
+########################################################
+
+########################################################
+
+[WorldDetector] Classifying world (attempt 1)...
+[WorldDetector] World classified as: survival (confidence: 15%, scoreboard: "none", gamemode: survival)
+[Connection] Initial classification: survival (confidence: 15%)
+[Connection] State: proxy -> survival
+[Connection] Connected to survival world!
+[Connection] State: survival -> ready
+[Agent] Connection ready: world=survival, server=unknown
+[ServerCapabilities] Detecting server capabilities...
+[ServerCapabilities] Detected: break=null, compass=false, npcs=true, gui=undefined
+[Agent] Not in survival (gameMode=survival, state=ready). Attempting to join survival...
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20) {
+  errno: -4077,
+  code: 'ECONNRESET',
+  syscall: 'read'
+}
+[Agent] Disconnected — auto-reconnect will handle reconnection.
+ayushi_ds_2026 updating available agents
+[Agent] Sent "/server survival", waiting 6s for position change...
+ayushi_ds_2026 updating available agents
+ayushi_ds_2026 updating available agents
+[Agent] Sent "/survival", waiting 6s for position change...
+[ServerAnalyzer] Boot phase 2: Command discovery running
+[Agent] Sent "/join survival", waiting 6s for position change...

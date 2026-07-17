@@ -66,15 +66,17 @@ export class NPCContoller {
         }
 
         this.agent.bot.on('idle', async () => {
-            if (this.data.goals.length === 0 && !this.data.curr_goal) return;
-            // Wait a while for inputs before acting independently
-            await new Promise((resolve) => setTimeout(resolve, 5000));
-            if (!this.agent.isIdle()) return;
+            try {
+                if (this.data.goals.length === 0 && !this.data.curr_goal) return;
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+                if (!this.agent.isIdle()) return;
 
-            // Persue goal
-            if (!this.agent.actions.resume_func) {
-                this.executeNext();
-                this.agent.history.save();
+                if (!this.agent.actions.resume_func) {
+                    this.executeNext();
+                    await this.agent.history.save();
+                }
+            } catch (err) {
+                console.error('[NPC] idle handler error:', err.message);
             }
         });
     }

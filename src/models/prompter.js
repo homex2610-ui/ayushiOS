@@ -10,6 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { selectAPI, createModel } from './_model_map.js';
 import { ModelRouter } from './model_router.js';
+import { AIService } from '../services/ai_service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,14 +60,17 @@ export class Prompter {
         if (this.profile.max_tokens)
             max_tokens = this.profile.max_tokens;
 
-        if (Array.isArray(this.profile.models)) {
+        if (settings.enable_llm !== false && Array.isArray(this.profile.models)) {
             this.chat_model = new ModelRouter(this.profile.models);
-        } else {
+            this.ai_service = new AIService();
+            this.ai_service.initialize(this.profile.models);
+        } else if (settings.enable_llm !== false) {
             let chat_model_profile = selectAPI(this.profile.model);
             this.chat_model = createModel(chat_model_profile);
+            this.ai_service = null;
         }
 
-        if (this.profile.code_model) {
+        if (settings.enable_llm !== false && this.profile.code_model) {
             let code_model_profile = selectAPI(this.profile.code_model);
             this.code_model = createModel(code_model_profile);
         }
@@ -95,7 +99,7 @@ export class Prompter {
             this.embedding_model = createModel(embedding_model_profile);
         }
         else {
-            this.embedding_model = createModel({api: chat_model_profile.api});
+            this.embedding_model = null;
         }
 
         this.skill_libary = new SkillLibrary(agent, this.embedding_model);
@@ -190,6 +194,78 @@ export class Prompter {
             prompt = prompt.replaceAll('$TO_SUMMARIZE', stringifyTurns(to_summarize));
         if (prompt.includes('$CONVO'))
             prompt = prompt.replaceAll('$CONVO', 'Recent conversation:\n' + stringifyTurns(messages));
+        if (prompt.includes('$GAME_STATE')) {
+            const bot = this.agent.bot;
+            const pos = bot.entity?.position;
+            let state = '=== GAME STATE ===';
+            if (bot.entity && pos) {
+                state += `\nHP: ${Math.round(bot.health)}/20  Food: ${Math.round(bot.food)}/20  Pos: ${pos.x.toFixed(1)} ${pos.y.toFixed(1)} ${pos.z.toFixed(1)}`;
+            } else {
+                state += '\nNot spawned yet.';
+            }
+            if (bot.entities) {
+                const players = Object.values(bot.entities)
+                    .filter(e => e.type === 'player' && e.username !== bot.username && e.position && bot.entity?.position)
+                    .map(e => ({ name: e.username, dist: Math.round(bot.entity.position.distanceTo(e.position)) }))
+                    .sort((a, b) => a.dist - b.dist);
+                if (players.length > 0) {
+                    state += `\nPlayers: ${players.map(p => `${p.name}(${p.dist}m)`).join(', ')}`;
+                }
+                const mobs = Object.values(bot.entities)
+                    .filter(e => e.type === 'mob' && e.position && bot.entity?.position && e.position.distanceTo(bot.entity.position) < 32)
+                    .map(e => ({ name: e.name || e.displayName, dist: Math.round(bot.entity.position.distanceTo(e.position)) }))
+                    .sort((a, b) => a.dist - b.dist);
+                if (mobs.length > 0) {
+                    const grouped = {};
+                    for (const m of mobs) {
+                        if (!grouped[m.name]) grouped[m.name] = { count: 0, minDist: m.dist };
+                        grouped[m.name].count++;
+                        if (m.dist < grouped[m.name].minDist) grouped[m.name].minDist = m.dist;
+                    }
+                    state += `\nMobs: ${Object.entries(grouped).map(([n, g]) => `${g.count}×${n}(${g.minDist}m)`).join(', ')}`;
+                }
+                const npcs = Object.values(bot.entities)
+                    .filter(e => {
+                        if (e.type === 'player' || e.type === 'mob' || !e.position || !bot.entity?.position) return false;
+                        const customName = e.metadata?.[2]?.toString?.().replace(/§./g, '').trim();
+                        return customName && e.position.distanceTo(bot.entity.position) < 32;
+                    })
+                    .map(e => ({
+                        name: e.metadata?.[2]?.toString?.().replace(/§./g, '').trim() || e.name,
+                        dist: Math.round(bot.entity.position.distanceTo(e.position))
+                    }))
+                    .sort((a, b) => a.dist - b.dist);
+                if (npcs.length > 0) {
+                    state += `\nNPCs: ${npcs.map(n => `${n.name}(${n.dist}m)`).join(', ')}`;
+                }
+            }
+            if (bot.inventory) {
+                const counts = {};
+                for (const slot of bot.inventory.slots) {
+                    if (slot && slot.name) counts[slot.name] = (counts[slot.name] || 0) + slot.count;
+                }
+                const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 12);
+                if (entries.length > 0) {
+                    state += `\nItems: ${entries.map(([n, c]) => `${n}×${c}`).join(', ')}`;
+                }
+                let armor = [];
+                const armorSlots = [5, 6, 7, 8];
+                for (const idx of armorSlots) {
+                    const slot = bot.inventory.slots[idx];
+                    if (slot) armor.push(slot.name);
+                }
+                if (armor.length > 0) state += `\nArmor: ${armor.join(', ')}`;
+            }
+            if (this.agent.self_prompter && !this.agent.self_prompter.isStopped()) {
+                state += `\nGoal: ${this.agent.self_prompter.prompt}`;
+            }
+            if (this.agent.history?.memory) {
+                state += `\nMemory: ${this.agent.history.memory}`;
+            }
+            const action = this.agent.actions?.currentActionLabel || (this.agent.isIdle() ? 'Idle' : 'Busy');
+            state += `\nStatus: ${action}`;
+            prompt = prompt.replaceAll('$GAME_STATE', state);
+        }
         if (prompt.includes('$SELF_PROMPT')) {
             // if active or paused, show the current goal
             let self_prompt = !this.agent.self_prompter.isStopped() ? `YOUR CURRENT ASSIGNED GOAL: "${this.agent.self_prompter.prompt}"\n` : '';
@@ -226,62 +302,42 @@ export class Prompter {
     async checkCooldown() {
         let elapsed = Date.now() - this.last_prompt_time;
         if (elapsed < this.cooldown && this.cooldown > 0) {
-            await new Promise(r => setTimeout(r, this.cooldown - elapsed));
+            await new Promise(r => setTimeout(r, Math.min(this.cooldown - elapsed, 100)));
         }
         this.last_prompt_time = Date.now();
     }
 
     async promptConvo(messages) {
-        this.most_recent_msg_time = Date.now();
-        let current_msg_time = this.most_recent_msg_time;
+        if (settings.enable_llm === false) return '';
+        let prompt = this.profile.conversing;
+        prompt = await this.replaceStrings(prompt, messages, this.convo_examples);
 
-        for (let i = 0; i < 3; i++) { // try 3 times to avoid hallucinations
-            await this.checkCooldown();
-            if (current_msg_time !== this.most_recent_msg_time) {
+        try {
+            const model = this.ai_service || this.chat_model;
+            const generation = await model.sendRequest(messages, prompt);
+            if (typeof generation !== 'string') {
+                console.error('Error: Generated response is not a string', generation);
                 return '';
             }
-
-            let prompt = this.profile.conversing;
-            prompt = await this.replaceStrings(prompt, messages, this.convo_examples);
-            let generation;
-
-            try {
-                generation = await this.chat_model.sendRequest(messages, prompt);
-                if (typeof generation !== 'string') {
-                    console.error('Error: Generated response is not a string', generation);
-                    throw new Error('Generated response is not a string');
-                }
-                console.log("Generated response:", generation);
-                await this._saveLog(prompt, messages, generation, 'conversation');
-
-            } catch (error) {
-                console.error('Error during message generation or file writing:', error);
-                continue;
-            }
-
-            // Check for hallucination or invalid output
-            if (generation?.includes('(FROM OTHER BOT)')) {
-                console.warn('LLM hallucinated message as another bot. Trying again...');
-                continue;
-            }
-
-            if (current_msg_time !== this.most_recent_msg_time) {
-                console.warn(`${this.agent.name} received new message while generating, discarding old response.`);
+            if (generation.includes('(FROM OTHER BOT)')) {
+                console.warn('LLM hallucinated message as another bot.');
                 return '';
             }
-
-            if (generation?.includes('</think>')) {
-                const [_, afterThink] = generation.split('</think>')
-                generation = afterThink
+            let result = generation;
+            if (result?.includes('</think>')) {
+                const [_, afterThink] = result.split('</think>');
+                result = afterThink;
             }
-
-            return generation;
+            await this._saveLog(prompt, messages, result, 'conversation');
+            return result;
+        } catch (error) {
+            console.error('Error during message generation:', error.message);
+            return '';
         }
-
-        return '';
     }
 
     async promptCoding(messages) {
+        if (settings.enable_llm === false) return '';
         if (this.awaiting_coding) {
             console.warn('Already awaiting coding response, returning no response.');
             return '```//no response```';
@@ -298,11 +354,16 @@ export class Prompter {
     }
 
     async promptMemSaving(to_summarize) {
+        if (settings.enable_llm === false) return '';
         await this.checkCooldown();
         let prompt = this.profile.saving_memory;
         prompt = await this.replaceStrings(prompt, null, null, to_summarize);
-        let resp = await this.chat_model.sendRequest([], prompt);
-        await this._saveLog(prompt, to_summarize, resp, 'memSaving');
+        let resp;
+        try {
+            resp = await this.chat_model.sendRequest([], prompt);
+        } catch (e) {
+            throw e;
+        }
         if (resp?.includes('</think>')) {
             const [_, afterThink] = resp.split('</think>')
             resp = afterThink;
@@ -311,6 +372,7 @@ export class Prompter {
     }
 
     async promptShouldRespondToBot(new_message) {
+        if (settings.enable_llm === false) return false;
         await this.checkCooldown();
         let prompt = this.profile.bot_responder;
         let messages = this.agent.history.getHistory();
@@ -321,6 +383,7 @@ export class Prompter {
     }
 
     async promptVision(messages, imageBuffer) {
+        if (settings.enable_llm === false) return '';
         await this.checkCooldown();
         let prompt = this.profile.image_analysis;
         prompt = await this.replaceStrings(prompt, messages, null, null, null);
@@ -328,7 +391,7 @@ export class Prompter {
     }
 
     async promptGoalSetting(messages, last_goals) {
-        // deprecated
+        if (settings.enable_llm === false) return null;
         let system_message = this.profile.goal_setting;
         system_message = await this.replaceStrings(system_message, messages);
 

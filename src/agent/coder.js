@@ -13,7 +13,7 @@ export class Coder {
     constructor(agent) {
         this.agent = agent;
         this.file_counter = 0;
-        this.fp = '/bots/'+agent.name+'/action-code/';
+        this.fp = './bots/'+agent.name+'/action-code/';
         this.code_template = '';
         this.code_lint_template = '';
 

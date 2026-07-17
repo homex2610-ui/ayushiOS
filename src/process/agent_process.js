@@ -8,6 +8,10 @@ export class AgentProcess {
     constructor(name, port) {
         this.name = name;
         this.port = port;
+        this._exiting = false;
+        this._restartCount = 0;
+        this._maxRestarts = 15;
+        this._lastRestart = 0;
     }
 
     start(load_memory=false, init_message=null, count_id=0, serverSettings={}) {
@@ -23,71 +27,84 @@ export class AgentProcess {
             args.push('-m', init_message);
         args.push('-p', this.port);
 
-        // Pass server overrides via env to the child process
-        if (Object.keys(serverSettings).length > 0) {
-            process.env.MINDCRAFT_SERVER = JSON.stringify(serverSettings);
-        }
-
         const agentProcess = spawn(process.execPath, args, {
             stdio: 'inherit',
             stderr: 'inherit',
+            env: Object.keys(serverSettings).length > 0
+                ? { ...process.env, MINDCRAFT_SERVER: JSON.stringify(serverSettings) }
+                : { ...process.env },
         });
         
-        let last_restart = Date.now();
         agentProcess.on('exit', (code, signal) => {
             console.log(`Agent process exited with code ${code} and signal ${signal}`);
             this.running = false;
+            this.process = null;
             logoutAgent(this.name);
-            
+
+            if (this._exiting) return;
+
             if (code > 1) {
                 console.log(`Ending task`);
                 process.exit(code);
             }
 
             if (code !== 0 && signal !== 'SIGINT') {
-                // agent must run for at least 10 seconds before restarting
-                if (Date.now() - last_restart < 10000) {
+                this._restartCount++;
+                if (this._restartCount > this._maxRestarts) {
+                    console.error(`Agent crashed ${this._maxRestarts} times. Giving up.`);
+                    process.exit(1);
+                    return;
+                }
+                if (Date.now() - this._lastRestart < 10000) {
                     console.error(`Agent process exited too quickly and will not be restarted.`);
                     return;
                 }
-                last_restart = Date.now();
-                // random delay 1-4s before reconnect to look human-like
-                const reconnectDelay = 1000 + Math.random() * 3000;
-                console.log(`Waiting ${(reconnectDelay/1000).toFixed(1)}s before reconnecting...`);
+                this._lastRestart = Date.now();
+                const reconnectDelay = Math.min(1000 + this._restartCount * 2000, 30000) + Math.random() * 3000;
+                console.log(`Restart #${this._restartCount} — waiting ${(reconnectDelay/1000).toFixed(1)}s before reconnecting...`);
                 setTimeout(() => {
-                    console.log('Restarting agent...');
-                    this.start(true, 'Agent process restarted.', count_id);
+                    if (!this._exiting) {
+                        console.log('Restarting agent...');
+                        this._load_memory = true;
+                        this._init_message = 'Agent process restarted.';
+                        this.start(true, 'Agent process restarted.', count_id);
+                    }
                 }, reconnectDelay);
             }
         });
     
         agentProcess.on('error', (err) => {
             console.error('Agent process error:', err);
+            this.process = null;
         });
 
         this.process = agentProcess;
     }
 
     stop() {
-        if (!this.running) return;
+        if (!this.running || !this.process) return;
+        this._exiting = true;
         this.process.kill('SIGINT');
     }
 
     forceRestart() {
+        if (this._exiting) return;
         if (this.running && this.process && !this.process.killed) {
             console.log(`Agent process for ${this.name} is still running. Attempting to force restart.`);
             
             const restartTimeout = setTimeout(() => {
                 console.warn(`Agent ${this.name} did not stop in time. It might be stuck.`);
-            }, 5000); // 5 seconds to exit
+            }, 5000);
 
             this.process.once('exit', () => {
                  clearTimeout(restartTimeout);
-                 console.log(`Stopped hanging agent ${this.name}. Now restarting.`);
-                 this.start(true, 'Agent process restarted.', this.count_id);
+                 if (!this._exiting) {
+                     console.log(`Stopped hanging agent ${this.name}. Now restarting.`);
+                     this.start(true, 'Agent process restarted.', this.count_id);
+                 }
             });
-            this.stop(); // sends SIGINT
-        } else {
+            this.process.kill('SIGINT');
+        } else if (!this._exiting) {
              this.start(true, 'Agent process restarted.', this.count_id);
         }
     }

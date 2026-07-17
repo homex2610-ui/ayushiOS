@@ -1,6 +1,7 @@
 import { createMindServer, registerAgent, numStateListeners } from './mindserver.js';
 import { AgentProcess } from '../process/agent_process.js';
 import { getServer } from './mcserver.js';
+import { connectionManager } from '../connection/ConnectionManager.js';
 import open from 'open';
 
 let mindserver;
@@ -11,7 +12,7 @@ let mindserver_port = 8080;
 
 export async function init(host_public=false, port=8080, auto_open_ui=true) {
     if (connected) {
-        console.error('Already initiliazed!');
+        console.error('Already initialized!');
         return;
     }
     mindserver = createMindServer(host_public, port);
@@ -52,15 +53,22 @@ export async function createAgent(settings) {
     }
 
     try {
+        // Use ConnectionManager to select target (LAN priority > public SMP)
         try {
+            const target = await connectionManager.selectTarget(settings);
+            settings.host = target.host;
+            settings.port = target.port;
+            settings.auth = target.auth;
+            settings.minecraft_version = target.minecraft_version;
+            settings.connection_source = target.source;
+            settings.connection_type = target.type;
+        } catch (selectError) {
+            // Fallback: if ConnectionManager selects nothing, use original getServer
+            console.warn(`[ConnectionManager] Server selection failed: ${selectError.message}. Falling back to direct connection.`);
             const server = await getServer(settings.host, settings.port, settings.minecraft_version);
             settings.host = server.host;
             settings.port = server.port;
             settings.minecraft_version = server.version;
-        } catch (error) {
-            console.error(`Could not find Minecraft server. Check your settings.`);
-            console.error(`Check: host=${settings.host}, port=${settings.port}, version=${settings.minecraft_version}`);
-            throw error;
         }
 
         const agentProcess = new AgentProcess(agent_name, mindserver_port);

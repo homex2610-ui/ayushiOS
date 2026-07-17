@@ -66,42 +66,36 @@ class ConversationManager {
         let wait_time = 0;
         let last_time = Date.now();
         this.connection_monitor = setInterval(async () => {
-            if (!this.activeConversation) {
-                this._stopMonitor();
-                return;
-            }
-
-            let delta = Date.now() - last_time;
-            last_time = Date.now();
-            let convo_partner = this.activeConversation.name;
-
-            if (this.awaiting_response && agent.isIdle()) {
-                wait_time += delta;
-                if (wait_time > this.wait_time_limit) {
-                    await agent.handleMessage('system', `${convo_partner} hasn't responded in ${this.wait_time_limit/1000} seconds, respond with a message to them or your own action.`);
-                    wait_time = 0;
-                    this.wait_time_limit*=2;
+            try {
+                if (!this.activeConversation) {
+                    this._stopMonitor();
+                    return;
                 }
-            }
-            else if (!this.awaiting_response){
-                this.wait_time_limit = WAIT_TIME_START;
-                wait_time = 0;
-            }
 
-            if (!this.otherAgentInGame(convo_partner) && !this.connection_timeout) {
-                this.connection_timeout = setTimeout(async () => {
-                    if (this.otherAgentInGame(convo_partner)){
-                        this._clearMonitorTimeouts();
-                        return;
+                let delta = Date.now() - last_time;
+                last_time = Date.now();
+                let convo_partner = this.activeConversation.name;
+
+                if (this.awaiting_response && agent.isIdle()) {
+                    wait_time += delta;
+                    if (wait_time > this.wait_time_limit) {
+                        await agent.handleMessage('system', `${convo_partner} hasn't responded in ${this.wait_time_limit/1000} seconds, respond with a message to them or your own action.`);
+                        wait_time = 0;
+                        this.wait_time_limit*=2;
                     }
-                    if (!agent.self_prompter.isPaused()) {
-                        this.endConversation(convo_partner);
-                        await agent.handleMessage('system', `${convo_partner} disconnected, conversation has ended.`);
-                    }
-                    else {
-                        this.endConversation(convo_partner);
-                    }
-                }, 10000);
+                }
+                else if (!this.awaiting_response){
+                    this.wait_time_limit = WAIT_TIME_START;
+                    wait_time = 0;
+                }
+
+                if (!this.otherAgentInGame(convo_partner) && !this.connection_timeout) {
+                    this.connection_timeout = setTimeout(() => {
+                        this._handleDisconnect(convo_partner).catch(err => console.error('[Convo] Disconnect handler error:', err.message));
+                    }, 10000);
+                }
+            } catch (err) {
+                console.error('[ConvoMonitor] Error:', err.message);
             }
         }, 1000);
     }
@@ -116,6 +110,24 @@ class ConversationManager {
         this.awaiting_response = false;
         clearTimeout(this.connection_timeout);
         this.connection_timeout = null;
+    }
+
+    async _handleDisconnect(convo_partner) {
+        try {
+            if (this.otherAgentInGame(convo_partner)){
+                this._clearMonitorTimeouts();
+                return;
+            }
+            if (!agent.self_prompter.isPaused()) {
+                this.endConversation(convo_partner);
+                await agent.handleMessage('system', `${convo_partner} disconnected, conversation has ended.`);
+            }
+            else {
+                this.endConversation(convo_partner);
+            }
+        } catch (err) {
+            console.error('[Convo] _handleDisconnect error:', err.message);
+        }
     }
 
     async startConversation(send_to, message) {
@@ -345,9 +357,15 @@ function _tagMessage(message) {
     return "(FROM OTHER BOT)" + message;
 }
 
+export function resetState() {
+    agent = null;
+    agent_names = [];
+    agents_in_game = [];
+}
+
 async function _resumeSelfPrompter() {
     await new Promise(resolve => setTimeout(resolve, 5000));
-    if (agent.self_prompter.isPaused() && !convoManager.inConversation()) {
+    if (agent && agent.self_prompter && agent.self_prompter.isPaused && !convoManager.inConversation()) {
         agent.self_prompter.start();
     }
 }

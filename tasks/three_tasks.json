@@ -1,0 +1,24 @@
+[
+  { "skill": "chat", "params": { "message": "Starting 3-task pipeline: PvP kills, wheat farm, iron armor!" } },
+  { "skill": "wait", "params": { "ms": 3000 } },
+
+  { "skill": "combat", "params": { "target": "player", "count": 3, "range": 64, "stopOnHealth": 6, "duration": 120000 } },
+
+  { "skill": "eat", "params": { "minFood": 16 } },
+
+  { "skill": "farm", "params": { "crop": "wheat_seeds", "size": 4 } },
+
+  { "skill": "collect", "params": { "item": "iron_ore", "count": 6 } },
+  { "skill": "collect", "params": { "item": "coal", "count": 3 } },
+  { "skill": "smelt", "params": { "input": "raw_iron", "count": 6, "fuel": "coal" } },
+  { "skill": "craft", "params": { "item": "iron_helmet", "count": 1 } },
+  { "skill": "craft", "params": { "item": "iron_chestplate", "count": 1 } },
+  { "skill": "craft", "params": { "item": "iron_leggings", "count": 1 } },
+  { "skill": "craft", "params": { "item": "iron_boots", "count": 1 } },
+  { "skill": "equip", "params": { "item": "iron_helmet", "slot": "head" } },
+  { "skill": "equip", "params": { "item": "iron_chestplate", "slot": "torso" } },
+  { "skill": "equip", "params": { "item": "iron_leggings", "slot": "legs" } },
+  { "skill": "equip", "params": { "item": "iron_boots", "slot": "feet" } },
+
+  { "skill": "chat", "params": { "message": "All 3 tasks complete! Killed players, farmed wheat, crafted iron armor." } }
+]

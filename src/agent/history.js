@@ -1,7 +1,14 @@
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
-import { NPCData } from './npc/data.js';
 import settings from './settings.js';
 
+function simpleHash(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) {
+        h = ((h << 5) - h) + s.charCodeAt(i);
+        h |= 0;
+    }
+    return h;
+}
 
 export class History {
     constructor(agent) {
@@ -13,33 +20,42 @@ export class History {
         mkdirSync(`./bots/${this.name}/histories`, { recursive: true });
 
         this.turns = [];
-
-        // Natural language memory as a summary of recent messages + previous memory
         this.memory = '';
-
-        // Maximum number of messages to keep in context before saving chunk to memory
         this.max_messages = settings.max_messages;
+        this.summary_chunk_size = 5;
 
-        // Number of messages to remove from current history and save into memory
-        this.summary_chunk_size = 5; 
-        // chunking reduces expensive calls to promptMemSaving and appendFullHistory
-        // and improves the quality of the memory summary
+        this._lastSave = 0;
+        this._lastMemoryHash = 0;
+        this._saveThrottle = 2000;
     }
 
-    getHistory() { // expects an Examples object
+    getHistory() {
         return JSON.parse(JSON.stringify(this.turns));
     }
 
     async summarizeMemories(turns) {
-        console.log("Storing memories...");
-        this.memory = await this.agent.prompter.promptMemSaving(turns);
+        if (turns.length === 0) return;
+        if (!this.agent.prompter || settings.enable_llm === false) {
+            this.memory = turns.map(t => t.content).join(' | ').slice(0, 500);
+            return;
+        }
+        const oldMem = this.memory;
+        try {
+            this.memory = await this.agent.prompter.promptMemSaving(turns);
+        } catch (e) {
+            console.warn('[History] Memory save failed:', e.message);
+            this.memory = oldMem || turns.map(t => t.content).join(' | ').slice(0, 300);
+            return;
+        }
 
         if (this.memory.length > 500) {
             this.memory = this.memory.slice(0, 500);
-            this.memory += '...(Memory truncated to 500 chars. Compress it more next time)';
+            this.memory += '...(truncated)';
         }
 
-        console.log("Memory updated to: ", this.memory);
+        if (this.memory === oldMem) {
+            this.memory = oldMem;
+        }
     }
 
     async appendFullHistory(to_store) {
@@ -72,7 +88,7 @@ export class History {
         if (this.turns.length >= this.max_messages) {
             let chunk = this.turns.splice(0, this.summary_chunk_size);
             while (this.turns.length > 0 && this.turns[0].role === 'assistant')
-                chunk.push(this.turns.shift()); // remove until turns starts with system/user message
+                chunk.push(this.turns.shift());
 
             await this.summarizeMemories(chunk);
             await this.appendFullHistory(chunk);
@@ -80,6 +96,12 @@ export class History {
     }
 
     async save() {
+        const now = Date.now();
+        const memHash = simpleHash(this.memory + JSON.stringify(this.turns.slice(-2)));
+        if (memHash === this._lastMemoryHash && now - this._lastSave < this._saveThrottle) return;
+        this._lastMemoryHash = memHash;
+        this._lastSave = now;
+
         try {
             const data = {
                 memory: this.memory,
@@ -90,27 +112,23 @@ export class History {
                 last_sender: this.agent.last_sender
             };
             writeFileSync(this.memory_fp, JSON.stringify(data, null, 2));
-            console.log('Saved memory to:', this.memory_fp);
         } catch (error) {
-            console.error('Failed to save history:', error);
-            throw error;
+            console.error('Failed to save history:', error.message);
         }
     }
 
     load() {
         try {
             if (!existsSync(this.memory_fp)) {
-                console.log('No memory file found.');
                 return null;
             }
             const data = JSON.parse(readFileSync(this.memory_fp, 'utf8'));
             this.memory = data.memory || '';
             this.turns = data.turns || [];
-            console.log('Loaded memory:', this.memory);
             return data;
         } catch (error) {
-            console.error('Failed to load history:', error);
-            throw error;
+            console.error('Failed to load history:', error.message);
+            return null;
         }
     }
 
