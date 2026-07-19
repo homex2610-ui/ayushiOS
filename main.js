@@ -71,8 +71,8 @@ if (args.task_path) {
     }
 }
 
-// Auto-load diamond_grind task if no task specified
-if (!settings.task && existsSync('./tasks/diamond_grind.json')) {
+// Auto-load diamond_grind task if no task specified and auto_task is not explicitly nullified
+if (settings.auto_task !== false && !settings.task && existsSync('./tasks/diamond_grind.json')) {
     try {
         const tasks = JSON.parse(readFileSync('./tasks/diamond_grind.json', 'utf8'));
         if (Array.isArray(tasks)) {
@@ -130,6 +130,14 @@ if (process.env.SETTINGS_JSON) {
     }
 }
 
+
+const cleanup = () => {
+    console.log('[Main] Shutting down...');
+    Mindcraft.shutdown();
+    process.exit(0);
+};
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
 
 Mindcraft.init(false, settings.mindserver_port, settings.auto_open_ui);
 

@@ -1,19 +1,22 @@
 // GoalPlanner.js
 // Deterministic, rule-based planning for autonomous bot behavior.
-// Plans are executed directly with available TaskRunner skills.
+// When advisorMode is on (AyushiOS brain active), only suggests plans —
+// ExecutiveBrain is the sole action authority.
 
 export class GoalPlanner {
     constructor(agent) {
         this.agent = agent;
         this.enabled = false;
+        this.advisorMode = false;
         this.lastPlan = 0;
         this.planInterval = 120000;
         this.plan = [];
         this.currentTask = null;
     }
 
-    start() {
+    start({ advisorMode = false } = {}) {
         this.enabled = true;
+        this.advisorMode = !!advisorMode;
     }
 
     stop() {
@@ -22,18 +25,59 @@ export class GoalPlanner {
         this.currentTask = null;
     }
 
+    setAdvisorMode(on) {
+        this.advisorMode = !!on;
+    }
+
     async tick() {
         if (!this.enabled) return;
         if (!this.agent.bot || !this.agent.bot.entity) return;
-        if (!this.agent.isIdle()) return;
-        if (this.currentTask) return;
-        if (!this.agent.taskRunner) return;
 
         const now = Date.now();
         if (now - this.lastPlan < this.planInterval) return;
         this.lastPlan = now;
 
+        if (this.advisorMode || !!this.agent.brain) {
+            this._suggestPlan();
+            return;
+        }
+
+        if (!this.agent.isIdle()) return;
+        if (this.currentTask) return;
+        if (!this.agent.taskRunner) return;
+
         await this._executePlan();
+    }
+
+    _suggestPlan() {
+        try {
+            const state = this._gatherState();
+            const plan = this._buildPlan(state);
+            if (!plan || plan.length === 0) return;
+
+            const planSummary = plan.map(step => `${step.skill}`).join(' -> ');
+            const goalHint = this._inferGoalHint(plan);
+            this.agent.brain?.proposeSuggestion?.({
+                type: 'plan',
+                goal: goalHint,
+                reason: `GoalPlanner suggests: ${planSummary}`,
+                priority: 0.35,
+                steps: plan,
+                source: 'goal_planner',
+            });
+            console.log(`[GoalPlanner] Advisor suggestion: ${planSummary}`);
+        } catch (err) {
+            console.warn('[GoalPlanner] Suggest failed:', err.message);
+        }
+    }
+
+    _inferGoalHint(plan) {
+        const skills = plan.map(s => s.skill).join(' ');
+        if (/eat|collect.*carrot|farm/.test(skills)) return 'eat';
+        if (/go_surface|move_to/.test(skills) && /wait/.test(skills)) return 'seek_safety';
+        if (/craft|smelt|equip|iron/.test(skills)) return 'craft_gear';
+        if (/oak_log|crafting_table|bed/.test(skills)) return 'build_base';
+        return 'explore_unknown';
     }
 
     async _executePlan() {

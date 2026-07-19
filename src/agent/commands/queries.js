@@ -231,28 +231,37 @@ export const queryList = [
         description: 'Show the bot\'s current belief state, including known safe spots, food sources, and discovered warps.',
         perform: function (agent) {
             const brain = agent.brain;
-            if (!brain || !brain.memory) {
+            if (!brain) {
                 return 'Beliefs unavailable: AyushiOS brain is not initialized.';
             }
             const pos = brain.senses?.getSnapshot?.().environment?.position;
             if (!pos) return 'Beliefs unavailable: position unknown.';
-            const beliefs = brain.memory.getBeliefs?.(pos);
+            // Route through Knowledge facade (BeliefState + MemoryMatrix merged)
+            const beliefs = brain.knowledge?.snapshot?.(pos) || brain.memory?.getBeliefs?.(pos);
             if (!beliefs) return 'No beliefs available yet.';
             const parts = [];
             parts.push(`Safe base: ${beliefs.hasSafeBase ? beliefs.nearestSafeBase?.name || 'known' : 'none'}`);
             if (beliefs.nearestFoodSource) {
                 parts.push(`Food source: ${beliefs.nearestFoodSource.name} @ ${beliefs.nearestFoodSource.position.x},${beliefs.nearestFoodSource.position.z}`);
             }
-            if (beliefs.knownNPCs && beliefs.knownNPCs.length > 0) {
+            if (beliefs.nearbyNPCs && beliefs.nearbyNPCs.length > 0) {
+                parts.push(`Nearby NPCs: ${beliefs.nearbyNPCs.map(n => n.name).slice(0, 5).join(', ')}`);
+            } else if (beliefs.knownNPCs && beliefs.knownNPCs.length > 0) {
                 parts.push(`Known NPCs: ${beliefs.knownNPCs.map(n => n.name).slice(0, 5).join(', ')}`);
             }
             if (beliefs.knownCommands && beliefs.knownCommands.length > 0) {
-                parts.push(`Known commands: ${beliefs.knownCommands.join(', ')}`);
+                parts.push(`Known commands: ${beliefs.knownCommands.map(c => c.command || c).join(', ')}`);
             }
             if (beliefs.connectedLocations && beliefs.connectedLocations.length > 0) {
                 parts.push(`Connected places: ${beliefs.connectedLocations.slice(0, 5).join(', ')}`);
             }
-            parts.push(`Known warps: ${beliefs.knownWarpCount}`);
+            if (beliefs.nearbyHazards && beliefs.nearbyHazards.length > 0) {
+                parts.push(`Nearby hazards: ${beliefs.nearbyHazards.map(h => h.type).slice(0, 3).join(', ')}`);
+            }
+            if (beliefs.scoreboard?.title) {
+                parts.push(`Scoreboard: ${beliefs.scoreboard.title}`);
+            }
+            parts.push(`Known warps: ${beliefs.knownWarpCount || 0}`);
             parts.push(`Hazards nearby: ${beliefs.hazardsNearby ? beliefs.hazardCount : 0}`);
             return 'BELIEFS\n' + parts.join('\n');
         }

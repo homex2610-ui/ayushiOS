@@ -2,8 +2,6 @@ import { exec, spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { TTSConfig as gptTTSConfig } from '../models/gpt.js';
-import { TTSConfig as geminiTTSConfig } from '../models/gemini.js';
 
 let speakingQueue = []; // each item: {text, model, audioData, ready}
 let isSpeaking = false;
@@ -27,27 +25,24 @@ export function speak(text, speak_model) {
 }
 
 async function fetchRemoteAudio(txt, model) {
-    function getModelUrl(prov) {
-        if (prov === 'openai') return gptTTSConfig.baseUrl;
-        if (prov === 'google') return geminiTTSConfig.baseUrl;
-        return 'https://api.openai.com/v1';
-    }
-
     let prov, mdl, voice, url;
     if (typeof model === 'string') {
         [prov, mdl, voice] = model.split('/');
-        url = getModelUrl(prov);
     } else {
         prov = model.api;
         mdl = model.model;
         voice = model.voice;
-        url = model.url || getModelUrl(prov);
+        url = model.url;
     }
 
     if (prov === 'openai') {
-        return gptTTSConfig.sendAudioRequest(txt, mdl, voice, url);
+        const { TTSConfig } = await import('../models/gpt.js');
+        const cfg = TTSConfig;
+        return cfg.sendAudioRequest(txt, mdl, voice, url || cfg.baseUrl);
     } else if (prov === 'google') {
-        return geminiTTSConfig.sendAudioRequest(txt, mdl, voice, url);
+        const { TTSConfig } = await import('../models/gemini.js');
+        const cfg = TTSConfig;
+        return cfg.sendAudioRequest(txt, mdl, voice, url || cfg.baseUrl);
     }
     else {
         throw new Error(`TTS Provider ${prov} is not supported.`);

@@ -59,6 +59,22 @@ try {
         serverProxy.setAgent(agent);
         console.log('Connecting to MindServer');
         await serverProxy.connect(argv.name, argv.port);
+
+        // Re-apply server overrides AFTER setSettings() resets them
+        try {
+            const serverEnv = process.env.MINDCRAFT_SERVER;
+            if (serverEnv) {
+                const overrides = JSON.parse(serverEnv);
+                if (overrides.host) settings.host = overrides.host;
+                if (overrides.port != null) settings.port = overrides.port;
+                if (overrides.auth) settings.auth = overrides.auth;
+                if (overrides.minecraft_version) settings.minecraft_version = overrides.minecraft_version;
+                if (overrides.password) settings.password = overrides.password;
+            }
+        } catch (e) {
+            console.warn('Failed to re-apply MINDCRAFT_SERVER env:', e.message);
+        }
+
         console.log('Starting agent');
         await agent.start(argv.load_memory, argv.init_message, argv.count_id);
     } catch (error) {

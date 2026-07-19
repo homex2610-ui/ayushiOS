@@ -11,6 +11,7 @@ export class ReflectionEngine {
 
     async tick() {
         if (!this.agent.memory_bank || !this.agent.bot?.entity) return;
+        if (!this.agent.prompter?.chat_model) return; // LLM disabled
         const now = Date.now();
         if (now - this.lastReflection < this.interval) return;
         this.lastReflection = now;

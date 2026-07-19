@@ -432,6 +432,9 @@ async function execute(mode, agent, func, timeout=-1) {
         await agent.self_prompter.stopLoop();
     let interrupted_action = agent.actions.currentActionLabel;
     const now = Date.now();
+    if (interrupted_action) {
+      agent.brain?.trace?.markInterrupted(`mode:${mode.name} preempted ${interrupted_action}`);
+    }
     mode.active = true;
     let code_return = await agent.actions.runAction(`mode:${mode.name}`, async () => {
         await func();

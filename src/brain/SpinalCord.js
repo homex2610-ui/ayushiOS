@@ -8,10 +8,11 @@
 // ─────────────────────────────────────────────────────────────
 
 export class SpinalCord {
-  constructor(bot, bus, { onInterrupt } = {}) {
+  constructor(bot, bus, { onInterrupt, masterName } = {}) {
     this.bot = bot;
     this.bus = bus;
     this.onInterrupt = onInterrupt || (() => {});
+    this._masterName = masterName || null;
     this._wire();
   }
 
@@ -65,6 +66,53 @@ export class SpinalCord {
         context: { locationName: 'last_death_position' },
       });
     });
+
+    // 8. Emergency kill switch via in-game whisper.
+    //    Whisper "!panic" or "!shutdown" to the bot from the master account.
+    this.bot.on('whisper', (username, message) => {
+      if (!this._masterName || username.toLowerCase() !== this._masterName.toLowerCase()) return;
+      const cmd = (message || '').trim().toLowerCase();
+      if (cmd === '!panic' || cmd === '!shutdown') {
+        console.warn(`[SPINAL CORD] \u{1F6A8} Emergency kill switch triggered by ${username}`);
+        this.emergencyStop();
+      }
+    });
+  }
+
+  /**
+   * IMMEDIATE HARD STOP — bypasses all normal control flow.
+   * Cancel pathfinder, stop digging, clear movement controls, emit shutdown event.
+   * This is the final safety net — call it when the bot must stop NOW.
+   */
+  emergencyStop() {
+    try {
+      this.bot.pathfinder?.setGoal?.(null);
+      this.bot.pathfinder?.stop?.();
+    } catch (_) {}
+    try {
+      this.bot.stopDigging();
+    } catch (_) {}
+    try {
+      this.bot.setControlState('forward', false);
+      this.bot.setControlState('back', false);
+      this.bot.setControlState('left', false);
+      this.bot.setControlState('right', false);
+      this.bot.setControlState('jump', false);
+      this.bot.setControlState('sprint', false);
+      this.bot.setControlState('sneak', false);
+    } catch (_) {}
+    try {
+      this.bot.clearControlStates();
+    } catch (_) {}
+    try {
+      this.bot.pvp?.stop?.();
+    } catch (_) {}
+    try {
+      this.bot.collectBlock?.cancelTask?.();
+    } catch (_) {}
+    // Broadcast so MotorCortex and AyushiOS know to stop immediately
+    this.bus.emit('emergency_stop', { time: Date.now() });
+    console.warn('[SPINAL CORD] Bot hard-stopped — awaiting reconnect or manual restart.');
   }
 
   _fire(reflexType, meta) {
@@ -84,7 +132,7 @@ export class SpinalCord {
 // since "how do I move my body" is a motor concern, not a spinal one —
 // the spinal cord only decides THAT something must happen NOW.
 export const REFLEX_ACTIONS = {
-  async CREEPER_FLEE(bot) {
+  CREEPER_FLEE(bot) {
     bot.setControlState('sprint', true);
     bot.setControlState('jump', true);
     bot.setControlState('back', true);
@@ -95,17 +143,25 @@ export const REFLEX_ACTIONS = {
     if (shield) await bot.equip(shield, 'off-hand');
     bot.activateItem();
   },
-  async FIRE_ESCAPE(bot) {
+  FIRE_ESCAPE(bot) {
     bot.setControlState('jump', true);
     bot.setControlState('back', true);
     setTimeout(() => bot.clearControlStates(), 1000);
   },
-  async SURFACE_FOR_AIR(bot) {
+  SURFACE_FOR_AIR(bot) {
     bot.setControlState('jump', true);
     setTimeout(() => bot.setControlState('jump', false), 1500);
   },
-  async VOID_FALL_PANIC(bot) {
+  VOID_FALL_PANIC(bot) {
     // Try to place a block beneath if possible (best-effort, needs pathfinder/scaffolding logic)
     bot.setControlState('jump', false);
+  },
+  EMERGENCY_STOP(bot) {
+    try { bot.pathfinder?.setGoal?.(null); bot.pathfinder?.stop?.(); } catch (_) {}
+    try { bot.stopDigging(); } catch (_) {}
+    try { bot.clearControlStates(); } catch (_) {}
+    try { bot.pvp?.stop?.(); } catch (_) {}
+    try { bot.collectBlock?.cancelTask?.(); } catch (_) {}
+    console.warn('[REFLEX] EMERGENCY_STOP executed');
   }
 };

@@ -288,9 +288,26 @@ export function createMindServer(host_public = false, port = 8080) {
         console.log('Public hosting not supported yet. Using localhost.');
     }
     const host = 'localhost';
-    server.listen(port, host, () => {
+
+    function tryListen(attemptPort) {
+        server.listen(attemptPort, host);
+    }
+
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.warn(`Port ${port} is in use, trying port ${port + 1}...`);
+            port = port + 1;
+            tryListen(port);
+        } else {
+            console.error('MindServer error:', err);
+        }
+    });
+
+    server.on('listening', () => {
         console.log(`MindServer running on port ${port} on host ${host}`);
     });
+
+    tryListen(port);
 
     return server;
 }

@@ -33,6 +33,7 @@ export class MemoryMatrix {
         discoveredNPCs: {},  // name -> metadata
         hazards: [],         // [{id,type,position,reason,severity,radius,lastObserved}]
         regionNotes: {},     // regionKey -> notes
+        serverProfile: null, // durable server identity / economy / plugins
       },
       social: {              // relationships
         friends: {},         // username -> {trust, interactions, lastSeen, notes:[]}
@@ -43,10 +44,6 @@ export class MemoryMatrix {
     this.load();
 
     if (bus) {
-      bus.on('heard_speech', (e) => this.recordEvent(`${e.username} said: "${e.message}"`, 1));
-      bus.on('landmark_spotted', (landmark) => this.rememberWaypoint(landmark));
-      bus.on('warp_spotted', (warp) => this.rememberWarp(warp.name, warp.position, warp.note));
-      bus.on('server_command_seen', (cmd) => this.rememberServerCommand(cmd.command, cmd));
       bus.on('task_completed', ({ taskName }) => this.recordEvent(`Completed task: ${taskName}`, 1));
       bus.on('death_reported', (death) => this.recordDeath(death));
     }
@@ -113,6 +110,39 @@ export class MemoryMatrix {
   }
 
   // ---- Semantic memory ----
+  rememberServerProfile(profile = {}) {
+    const existing = this.longTerm.semantic.serverProfile || {};
+    const plugins = Array.isArray(profile.plugins)
+      ? profile.plugins
+      : (Array.isArray(existing.plugins) ? existing.plugins : []);
+    const economy = {
+      ...(existing.economy || {}),
+      ...(profile.economy || {}),
+    };
+    this.longTerm.semantic.serverProfile = {
+      ...existing,
+      name: profile.name ?? existing.name ?? null,
+      motd: profile.motd ?? existing.motd ?? null,
+      version: profile.version ?? existing.version ?? null,
+      spawn: profile.spawn ?? existing.spawn ?? null,
+      dimension: profile.dimension ?? existing.dimension ?? null,
+      pvp: profile.pvp ?? existing.pvp ?? false,
+      claimSystem: profile.claimSystem ?? existing.claimSystem ?? null,
+      economy,
+      plugins,
+      scoreboardTitle: profile.scoreboardTitle ?? existing.scoreboardTitle ?? null,
+      source: profile.source || existing.source || 'unknown',
+      updatedAt: Date.now(),
+    };
+    this.save();
+    this.bus?.emit('server_profile_recorded', this.longTerm.semantic.serverProfile);
+    return this.longTerm.semantic.serverProfile;
+  }
+
+  getServerProfile() {
+    return this.longTerm.semantic.serverProfile || null;
+  }
+
   setHome(pos) {
     this.longTerm.semantic.homePos = pos;
     this.save();
@@ -226,6 +256,7 @@ export class MemoryMatrix {
   findWaypoints({ type = null, tag = null, maxDistance = null, position = null } = {}) {
     return Object.values(this.longTerm.semantic.worldGraph.nodes)
       .filter(node => {
+        if (!node || !node.position) return false;
         if (type && node.type !== type) return false;
         if (tag && !node.tags.includes(tag)) return false;
         return true;
@@ -395,7 +426,8 @@ export class MemoryMatrix {
     const knownCommands = Object.entries(this.longTerm.semantic.serverCommands || {}).map(([cmd, data]) => ({ command: cmd, confidence: data.confidence, source: data.meta?.source || 'unknown' }));
     const connectedLocations = nearestSafeBase ? this.findConnectedNodes(nearestSafeBase.id, 'connected_to').map(node => node.name) : [];
     const recentEpisodes = this.getRecentEpisodes({ limit: 4, minImportance: 1 });
-    const pluginSummary = [];
+    const serverProfile = this.longTerm.semantic.serverProfile || null;
+    const pluginSummary = Array.isArray(serverProfile?.plugins) ? serverProfile.plugins : [];
 
     return {
       hasSafeBase: !!nearestSafeBase,
@@ -421,9 +453,13 @@ export class MemoryMatrix {
       connectedLocations,
       knownFoodSourceCount: nearbyFoodSources.length,
       recentEpisodes,
+      serverProfile,
       serverKnowledge: {
         commandCount: knownCommands.length,
         plugins: pluginSummary,
+        name: serverProfile?.name || null,
+        economy: serverProfile?.economy || null,
+        dimension: serverProfile?.dimension || null,
       }
     };
   }

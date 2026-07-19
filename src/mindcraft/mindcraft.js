@@ -116,8 +116,16 @@ export function destroyAgent(agentName) {
 
 export function shutdown() {
     console.log('Shutting down');
+    connected = false;
     for (let agentName in agent_processes) {
         agent_processes[agentName].stop();
+    }
+    if (mindserver) {
+        try {
+            mindserver.close();
+        } catch (e) {
+            // ignore close errors
+        }
     }
     setTimeout(() => {
         process.exit(0);

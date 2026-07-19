@@ -12,7 +12,25 @@ export class TaskRunner {
     constructor(bot) {
         this.bot = bot;
         this.skills = {};
+        this._running = false;
+        // NOTE: _running is not reset on disconnect — a new TaskRunner instance
+        // is created on reconnect (see agent.js boot), so this is safe.
+        // If TaskRunner instances are ever reused across connections,
+        // _running must be cleared in the disconnect handler.
+        this._interruptRequested = false;
         this._registerDefaultSkills();
+    }
+
+    isRunning() {
+        return this._running;
+    }
+
+    requestInterrupt() {
+        this._interruptRequested = true;
+    }
+
+    clearInterrupt() {
+        this._interruptRequested = false;
     }
 
     registerSkill(name, fn) {
@@ -44,7 +62,24 @@ export class TaskRunner {
                 }
                 throw new Error('move_to requires x,y,z or player name or block type');
             }
-            await skills.goToPosition(this.bot, x, y, z, range);
+            const maxRetries = 3;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                const result = await skills.goToPosition(this.bot, x, y, z, range);
+                if (result) return;
+                if (attempt < maxRetries) {
+                    console.log(`[TaskRunner] Move retry ${attempt}/${maxRetries} — attempting recovery...`);
+                    try {
+                        const p = this.bot.entity.position;
+                        const above = new Vec3(p.x, p.y + 1, p.z);
+                        const blockAbove = this.bot.blockAt(above);
+                        if (blockAbove && blockAbove.name === 'air') {
+                            await this.bot.jump();
+                        }
+                    } catch (_) { /* best-effort: jump may fail */ }
+                    await skills.wait(this.bot, 1000);
+                }
+            }
+            throw new Error(`Failed to reach ${x}, ${y}, ${z} after ${maxRetries} attempts`);
         });
 
         this.registerSkill('collect', async (params) => {
@@ -70,7 +105,25 @@ export class TaskRunner {
         this.registerSkill('craft', async (params) => {
             const { item, count = 1 } = params;
             if (!item) throw new Error('craft requires "item" parameter');
-            await skills.craftRecipe(this.bot, item, count);
+            const recipesInfo = mc.getItemCraftingRecipes(item);
+            if (!recipesInfo || recipesInfo.length === 0) {
+                throw new Error(`No known recipe for ${item}.`);
+            }
+            let ok = false;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                ok = await skills.craftRecipe(this.bot, item, count);
+                if (ok) break;
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            if (!ok) {
+                const required = recipesInfo[0][0];
+                const inv = world.getInventoryCounts(this.bot);
+                const missing = Object.entries(required).filter(([k]) => (inv[k] || 0) < 1);
+                if (missing.length > 0) {
+                    throw new Error(`Missing resources to craft ${item}. Need: ${Object.entries(required).map(([k,v]) => `${k}: ${v}`).join(', ')}`);
+                }
+                throw new Error(`Failed to craft ${item} — recipe API unavailable (have ingredients but cannot craft).`);
+            }
         });
 
         this.registerSkill('smelt', async (params) => {
@@ -106,6 +159,10 @@ export class TaskRunner {
                 let entity = null;
                 if (target === 'player' || target === 'players' || target === 'nearest') {
                     entity = world.getNearestEntityWhere(bot, e => e.type === 'player' && e.username !== bot.username, range);
+                } else if (target === 'animal' || target === 'passive' || target === 'mob') {
+                    entity = world.getNearestEntityWhere(bot, e =>
+                        e.type === 'mob' && e.name && !['creeper','zombie','skeleton','spider','enderman','witch'].includes(e.name), range
+                    );
                 } else {
                     entity = world.getNearestEntityWhere(bot, e =>
                         e.name === target || e.username === target, range
@@ -154,14 +211,15 @@ export class TaskRunner {
             };
             const destination = destMap[slot] || 'hand';
             if (item.includes('helmet') || item.includes('chestplate') || item.includes('leggings') || item.includes('boots')) {
-                try { bot.armorManager.equipAll(); } catch (_) {}
+                try { this.bot.armorManager?.equipAll?.(); } catch (_) { /* best-effort: armorManager may not be available */ }
                 return;
             }
             await skills.equip(this.bot, item);
         });
 
         this.registerSkill('eat', async (params) => {
-            const { food, minFood = 18 } = params;
+            const minFood = params.minFood ?? params.minFoodLevel ?? 18;
+            const food = params.food;
             if (this.bot.food >= minFood) {
                 console.log(`[TaskRunner] Food level ${this.bot.food}/${20}, skipping eat.`);
                 return;
@@ -271,9 +329,41 @@ export class TaskRunner {
         });
     }
 
-    async runTask(steps) {
+    async runTask(steps, opts = {}) {
+        if (this._running && !opts.force) {
+            console.log('[TaskRunner] Already running a task — rejecting concurrent start.');
+            return { success: false, reason: 'task_runner_busy' };
+        }
+
+        if (this._running && opts.force) {
+            console.log('[TaskRunner] Force start — interrupting current task...');
+            this.requestInterrupt();
+            this.bot.interrupt_code = true;
+            try { this.bot.pathfinder?.setGoal?.(null); } catch (_) { /* best-effort: may not have pathfinder */ }
+            const waitStart = Date.now();
+            while (this._running && Date.now() - waitStart < 5000) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+            if (this._running) {
+                console.warn('[TaskRunner] Previous task did not stop in time — taking over.');
+                this._running = false;
+            }
+            this.bot.interrupt_code = false;
+        }
+
+        this._running = true;
+        this._interruptRequested = false;
         console.log(`[TaskRunner] Starting task with ${steps.length} steps...`);
         for (let i = 0; i < steps.length; i++) {
+            if (this._interruptRequested) {
+                console.log(`[TaskRunner] Interrupted — aborting at step ${i + 1}/${steps.length}.`);
+                try { this.bot.pathfinder?.setGoal?.(null); } catch (_) { /* best-effort: may not have pathfinder */ }
+                this.bot.interrupt_code = true;
+                this._running = false;
+                this._interruptRequested = false;
+                return { success: false, reason: 'interrupted', failedStep: i + 1 };
+            }
+
             const step = steps[i];
             console.log(`[TaskRunner] Step ${i + 1}/${steps.length}: ${step.skill} ${JSON.stringify(step.params || {})}`);
 
@@ -293,11 +383,12 @@ export class TaskRunner {
             } catch (err) {
                 console.error(`[TaskRunner] Step ${i + 1} (${step.skill}) failed: ${err.message}`);
                 console.log(`[TaskRunner] Failed step ${i + 1} (${step.skill}): ${err.message}`);
+                this._running = false;
                 return { success: false, failedStep: i + 1, reason: err.message };
             }
         }
         console.log('[TaskRunner] Task complete!');
-        console.log('[TaskRunner] All tasks complete!');
+        this._running = false;
         return { success: true };
     }
 

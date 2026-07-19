@@ -137,6 +137,7 @@ export function initBot(username) {
         Item = prismarine_items(mc_version);
     });
 
+    bot.setMaxListeners(50);
     return bot;
 }
 

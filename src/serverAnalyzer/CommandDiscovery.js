@@ -65,6 +65,7 @@ export class CommandDiscovery {
         this.serverIntel = serverIntel || null;
         this._queue = [];
         this._running = false;
+        this._passive = false;
         this._cooldown = 3000;
         this._discovered = new Set();
         this._failed = new Set();
@@ -76,7 +77,22 @@ export class CommandDiscovery {
         this._cmdSentAt = 0;
     }
 
+    /** Observe-only: learn from chat/help text, never bot.chat probes. */
+    setPassive(on) {
+        this._passive = !!on;
+        if (this._passive) {
+            this._queue = [];
+            this._phase = 5;
+            this._running = false;
+            this.log('[CMD] Passive mode — observe only, no probing.');
+        }
+    }
+
     start() {
+        if (this._passive) {
+            this.log('[CMD] Skipping active discovery (passive mode).');
+            return;
+        }
         if (this._running) return;
         this._running = true;
         this._helpPageCount = 0;
@@ -148,7 +164,7 @@ export class CommandDiscovery {
     }
 
     _scheduleNext() {
-        if (!this._running) return;
+        if (!this._running || this._passive) return;
 
         if (this.serverIntel && this._lastCmdCheck) {
             const result = this._lastCmdCheck();
@@ -213,6 +229,13 @@ export class CommandDiscovery {
     }
 
     onChatResponse(msg) {
+        // Passive: learn from observed chat/help — never probe.
+        if (this._passive) {
+            if (HELP_PAGE_REGEX.test(msg)) this._addFromHelp(msg);
+            const cmdMention = msg.match(/\/([a-zA-Z_][\w]*)/);
+            if (cmdMention) this.addCustomCommand(`/${cmdMention[1]}`, 'observed');
+            return;
+        }
         if (this._phase === 0 || this._phase === 5) return;
         if (this._phase === 1) {
             const isHelpPage = HELP_PAGE_REGEX.test(msg);

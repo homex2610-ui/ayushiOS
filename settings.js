@@ -1,7 +1,7 @@
 const settings = {
     "minecraft_version": "auto", // "auto" detects version; or set a specific version like "1.21.4"
-    "host": "play.kryonmc.net", // server IP: "localhost", "your.ip.address.here", or "play.example.com"
-    "port": 25565, // -1 auto-scans LAN; set specific port for servers (e.g. 25565)
+    "host": "localhost", // server IP: "localhost", "your.ip.address.here", or "play.example.com"
+    "port": -1, // -1 auto-scans LAN; set specific port for servers (e.g. 25565)
     "auth": "offline", // "offline" for cracked servers / singleplayer LAN; "microsoft" for premium servers
     "password": process.env.MC_PASSWORD || "", // Password for auto-/register and /login (AuthMe, etc.)
 
@@ -37,7 +37,7 @@ const settings = {
     // if set to "system" it will use basic system text-to-speech. 
     // Works on windows and mac, but linux requires you to install the espeak package through your package manager eg: `apt install espeak` `pacman -S espeak`.
 
-    "chat_ingame": false, // bot responses are shown in minecraft chat
+    "chat_ingame": true, // bot responses are shown in minecraft chat
     "language": "en", // translate to/from this language. Supports these language names: https://cloud.google.com/translate/docs/languages
     "render_bot_view": false, // show bot's view in browser at localhost:3000, 3001...
 
@@ -81,8 +81,8 @@ const settings = {
     "bt_log": false, // verbose BT decision logging
 
     // Connection & World Management
-    "connection_prefer_lan": false, // skip LAN scan, go straight to configured SMP
-    "connection_auto_fallback": true, // fall back to public SMP if LAN unavailable
+    "connection_prefer_lan": true, // skip LAN scan, go straight to configured SMP
+    "connection_auto_fallback": false, // fall back to public SMP if LAN unavailable
     "connection_auto_reconnect": true, // auto reconnect on disconnect
     "connection_auto_detect_hub": false, // disabled - connect directly, let bot work even in hub spawn
 
@@ -96,7 +96,7 @@ const settings = {
     "terminal_console_prefix": "/", // prefix for terminal commands
 
     "enable_brain": true, // AyushiOS autonomous brain (need/emotion/personality system)
-    "auto_task": null, // handled via _taskSteps now
+    "auto_task": false, // set to true to auto-load tasks/diamond_grind.json
 
     "goal_plan_interval": 120000, // ms between autonomous plan cycles
     "episodic_replay_interval": 1500000, // ms between memory consolidation (~25min)

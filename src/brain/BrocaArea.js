@@ -77,7 +77,13 @@ export class BrocaArea {
   }
 
   _beliefs(snapshot) {
-    return this.brain?.memory?.getBeliefs?.(snapshot?.environment?.position) || {};
+    const pos = snapshot?.environment?.position || null;
+    // Prefer the Knowledge facade (BeliefState + MemoryMatrix merged view)
+    if (this.brain?.knowledge?.snapshot) {
+      return this.brain.knowledge.snapshot(pos);
+    }
+    // Fallback: MemoryMatrix getBeliefs (for non-brain contexts)
+    return this.brain?.memory?.getBeliefs?.(pos) || {};
   }
 
   _goalName() {

@@ -9,6 +9,7 @@ import { computeHubScore } from '../hub/HubDetector.js';
 import { HubProfile } from '../hub/HubProfile.js';
 import { dumpAll } from '../debug/ServerInspectors.js';
 import CONNECTION_CONFIG, { ServerState, WorldType } from './ConnectionSettings.js';
+import { getServer } from '../mindcraft/mcserver.js';
 
 export class ConnectionManager {
     constructor() {
@@ -88,7 +89,7 @@ export class ConnectionManager {
         this.serverSelector.settings = settings;
 
         let lanServer = null;
-        if (CONNECTION_CONFIG.preferLAN) {
+        if (settings.connection_prefer_lan || CONNECTION_CONFIG.preferLAN) {
             lanServer = await this.lanScanner.scan('127.0.0.1');
         }
 
@@ -97,6 +98,21 @@ export class ConnectionManager {
         if (!this._targetServer) {
             this._setState(ServerState.ERROR);
             throw new Error('[Connection] No server available to connect to.');
+        }
+
+        // If port is -1, resolve via LAN scan
+        if (this._targetServer.port === -1) {
+            console.log('[Connection] Port is -1, scanning LAN for Minecraft world...');
+            try {
+                const server = await getServer(this._targetServer.host, -1, this._targetServer.minecraft_version);
+                this._targetServer.host = server.host;
+                this._targetServer.port = server.port;
+                this._targetServer.minecraft_version = server.version;
+                console.log(`[Connection] LAN world found: ${server.host}:${server.port}`);
+            } catch (err) {
+                console.warn(`[Connection] LAN scan failed: ${err.message}`);
+                throw err;
+            }
         }
 
         console.log(`[Connection] Target selected: ${this._targetServer.host}:${this._targetServer.port} (${this._targetServer.type})`);
@@ -258,7 +274,12 @@ export class ConnectionManager {
     }
 
     async _signalReady(worldProfile) {
-        this._setState(ServerState.READY);
+        // Preserve hub/survival classification — READY used to overwrite SURVIVAL and
+        // broke agent checks like connectionManager.state === 'survival'.
+        const preserve = [ServerState.SURVIVAL, ServerState.HUB, ServerState.LOBBY, ServerState.SELECTING_SERVER];
+        if (!preserve.includes(this.state)) {
+            this._setState(ServerState.READY);
+        }
         const result = {
             success: true,
             worldProfile,

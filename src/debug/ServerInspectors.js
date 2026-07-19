@@ -45,7 +45,7 @@ export function dumpNPCs(bot) {
     if ((isPlayer && entity.username !== bot.username) || hasName) {
       const name = entity.username || entity.metadata[2];
       const distance = bot.entity.position.distanceTo(entity.position).toFixed(1);
-      console.log(`  - [${entity.type.toUpperCase()}] ${name} | Dist: ${distance}m | Pos: ${entity.position.floored().toString()}`);
+      console.log(`  - [${(entity.type || 'unknown').toUpperCase()}] ${name} | Dist: ${distance}m | Pos: ${entity.position.floored().toString()}`);
       detected++;
     }
   }

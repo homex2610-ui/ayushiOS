@@ -12,6 +12,7 @@ export class MetaLearner {
 
     async tick() {
         if (!this.agent.memory_bank || !this.agent.bot?.entity) return;
+        if (!this.agent.prompter?.chat_model) return; // LLM disabled
         const now = Date.now();
         if (now - this.lastMeta < this.interval) return;
         this.lastMeta = now;

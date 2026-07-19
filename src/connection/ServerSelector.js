@@ -14,7 +14,10 @@ export class ServerSelector {
         console.log('[ServerSelector] Selecting target server...');
         console.log(`[ServerSelector] Priority: ${CONNECTION_CONFIG.priority.map(p => p.label).join(' > ')}`);
 
-        if (CONNECTION_CONFIG.preferLAN && lanServer) {
+        const preferLAN = this.settings.connection_prefer_lan ?? CONNECTION_CONFIG.preferLAN;
+        const autoFallback = this.settings.connection_auto_fallback ?? CONNECTION_CONFIG.autoFallback;
+
+        if (preferLAN && lanServer) {
             console.log(`[ServerSelector] LAN world detected! Selecting: ${lanServer.host}:${lanServer.port}`);
             this._selectedServer = {
                 host: lanServer.host,
@@ -27,8 +30,11 @@ export class ServerSelector {
             return this._selectedServer;
         }
 
-        if (CONNECTION_CONFIG.autoFallback && this.settings.host) {
-            console.log(`[ServerSelector] Falling back to configured SMP: ${this.settings.host}:${this.settings.port}`);
+        // Use configured host whenever LAN is unavailable (or preferLAN is false).
+        // autoFallback only gated this before, which left preferLAN=true + no LAN → null.
+        if (this.settings.host) {
+            const reason = autoFallback ? 'fallback' : 'configured';
+            console.log(`[ServerSelector] Using ${reason} SMP: ${this.settings.host}:${this.settings.port}`);
             this._selectedServer = {
                 host: this.settings.host,
                 port: this.settings.port,
@@ -45,7 +51,8 @@ export class ServerSelector {
     }
 
     async selectFallback(lanServer, settings) {
-        if (CONNECTION_CONFIG.preferLAN && lanServer) {
+        const preferLAN = settings.connection_prefer_lan ?? CONNECTION_CONFIG.preferLAN;
+        if (preferLAN && lanServer) {
             return {
                 host: lanServer.host,
                 port: lanServer.port,

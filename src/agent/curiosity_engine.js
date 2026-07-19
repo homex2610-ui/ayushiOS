@@ -2,18 +2,24 @@ export class CuriosityEngine {
     constructor(agent) {
         this.agent = agent;
         this.enabled = false;
+        this.advisorMode = false;
         this.lastTick = 0;
         this.currentBehavior = null;
         this.learnedFacts = [];
     }
 
-    start() {
+    start({ advisorMode = false } = {}) {
         this.enabled = true;
+        this.advisorMode = !!advisorMode;
         this.lastTick = Date.now();
     }
 
     stop() {
         this.enabled = false;
+    }
+
+    setAdvisorMode(on) {
+        this.advisorMode = !!on;
     }
 
     async tick() {
@@ -23,6 +29,11 @@ export class CuriosityEngine {
         const now = Date.now();
         if (now - this.lastTick < 5000) return;
         this.lastTick = now;
+
+        if (this.advisorMode || !!this.agent.brain) {
+            this._suggest();
+            return;
+        }
 
         if (!this.agent.isIdle()) return;
         if (this.agent.self_prompter.isActive()) return;
@@ -43,6 +54,55 @@ export class CuriosityEngine {
                 break;
             case 'practice_skill':
                 break;
+        }
+    }
+
+    _suggest() {
+        const behavior = this._pickBehavior();
+        this.currentBehavior = behavior;
+        const bot = this.agent.bot;
+        const propose = (suggestion) => {
+            this.agent.brain?.proposeSuggestion?.({
+                ...suggestion,
+                source: 'curiosity',
+            });
+        };
+
+        if (behavior === 'explore') {
+            const yaw = Math.random() * Math.PI * 2;
+            const dist = 8 + Math.random() * 12;
+            const x = bot.entity.position.x + Math.cos(yaw) * dist;
+            const z = bot.entity.position.z + Math.sin(yaw) * dist;
+            propose({
+                type: 'explore',
+                goal: 'explore_unknown',
+                reason: `Look around near ${Math.round(x)}, ${Math.round(z)}`,
+                priority: 0.25,
+                steps: [
+                    { skill: 'move_to', params: { x: Math.round(x), y: Math.round(bot.entity.position.y), z: Math.round(z), range: 5 } },
+                    { skill: 'wait', params: { ms: 4000 } },
+                ],
+            });
+            return;
+        }
+
+        if (behavior === 'observe_player') {
+            propose({
+                type: 'social',
+                goal: 'socialize',
+                reason: 'Nearby player worth observing',
+                priority: 0.2,
+            });
+            return;
+        }
+
+        if (behavior === 'try_interact') {
+            propose({
+                type: 'explore',
+                goal: 'explore_unknown',
+                reason: 'Interesting block nearby',
+                priority: 0.22,
+            });
         }
     }
 
@@ -72,7 +132,7 @@ export class CuriosityEngine {
         const dist = 8 + Math.random() * 12;
         const x = bot.entity.position.x + Math.cos(yaw) * dist;
         const z = bot.entity.position.z + Math.sin(yaw) * dist;
-        const nearby = this.agent.worldKnowledge?.getInterestingBlocks()?.slice(0, 2).join(', ') || '';
+        const nearby = this.agent.worldKnowledge?.getInterestingBlocks?.()?.slice(0, 2).join(', ') || '';
         const goal = `Look around at ${Math.round(x)}, ${Math.round(z)}${nearby ? ' (near: ' + nearby + ')' : ''}`;
         this.agent.self_prompter.pushGoal(goal);
         setTimeout(() => {
@@ -103,7 +163,7 @@ export class CuriosityEngine {
 
     _doTryInteract() {
         const bot = this.agent.bot;
-        const target = this.agent.worldKnowledge?.getInterestingBlocks()?.[0];
+        const target = this.agent.worldKnowledge?.getInterestingBlocks?.()?.[0];
         if (!target) return;
         const goal = `Try to touch the ${target} nearby`;
         this.agent.self_prompter.pushGoal(goal);
@@ -115,7 +175,6 @@ export class CuriosityEngine {
     }
 
     learnFact(fact) {
-        const key = `curiosity_${Date.now()}`;
         this.learnedFacts.push({ fact, time: Date.now() });
         if (this.learnedFacts.length > 20) this.learnedFacts.shift();
         if (this.agent.memory_bank) {

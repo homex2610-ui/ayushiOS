@@ -45,6 +45,13 @@ function generatePassword() {
 export function setupAuthHandler(bot, username) {
     if (!username) username = bot.username;
     if (!username) username = 'ayushi';
+
+    // Skip auth on offline/LAN servers
+    if (settings.auth === 'offline' && !settings.password) {
+        console.log(`[AuthHandler] Offline mode — skipping auth for ${username}.`);
+        return { isAuthenticated: () => true, getPassword: () => null, getAuthData: () => ({}) };
+    }
+
     let authData = loadCredentials(username);
 
     const hasPassword = authData.password && authData.password.length > 0;

@@ -6,6 +6,18 @@ const SUCCESS = 'SUCCESS';
 const FAILURE = 'FAILURE';
 const RUNNING = 'RUNNING';
 
+async function gotoWithTimeout(bot, goal, timeoutMs) {
+    const timer = setTimeout(() => {
+        try { bot.pathfinder?.setGoal?.(null); } catch (_) {}
+        try { bot.pathfinder?.stop?.(); } catch (_) {}
+    }, timeoutMs);
+    try {
+        await bot.pathfinder.goto(goal);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 export class Action {
     constructor(fn) {
         this.fn = fn;
@@ -238,8 +250,14 @@ export class BehaviorTree {
                 if (ctx.bot.entity.position.distanceTo(entity.position) >= 3) {
                     try {
                         ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                        await ctx.bot.pathfinder.goto(new pf.goals.GoalFollow(entity, 2), true);
-                    } catch {}
+                        await gotoWithTimeout(ctx.bot, new pf.goals.GoalFollow(entity, 2), 10000);
+                    } catch (err) { console.warn(`[BT] fight chase failed: ${err.message}`); }
+                }
+                if (ctx.bot.entity.position.distanceTo(entity.position) <= 2) {
+                    try {
+                        ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
+                        await gotoWithTimeout(ctx.bot, new pf.goals.GoalInvert(new pf.goals.GoalFollow(entity, 2)), 8000);
+                    } catch (err) { console.warn(`[BT] fight backup failed: ${err.message}`); }
                 }
                 ctx.bot.pvp.attack(entity);
                 await new Promise(r => setTimeout(r, 300));
@@ -265,8 +283,8 @@ export class BehaviorTree {
             try {
                 const pf = await import('mineflayer-pathfinder');
                 ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                await ctx.bot.pathfinder.goto(new pf.goals.GoalBlock(retreatDir.x, retreatDir.y, retreatDir.z), true);
-            } catch {}
+                await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(retreatDir.x, retreatDir.y, retreatDir.z), 8000);
+            } catch (err) { console.warn(`[BT] retreat failed: ${err.message}`); }
             ctx.bot.modes.unPauseAll();
             return true;
         });
@@ -348,8 +366,8 @@ export class BehaviorTree {
             try {
                 const pf = await import('mineflayer-pathfinder');
                 ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                await ctx.bot.pathfinder.goto(new pf.goals.GoalBlock(pos.x, escapeY, pos.z), true);
-            } catch {}
+                await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(pos.x, escapeY, pos.z), 8000);
+            } catch (err) { console.warn(`[BT] lava escape failed: ${err.message}`); }
             return true;
         });
     }
@@ -386,8 +404,8 @@ export class BehaviorTree {
             try {
                 const pf = await import('mineflayer-pathfinder');
                 ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                await ctx.bot.pathfinder.goto(new pf.goals.GoalBlock(away.x, away.y, away.z), true);
-            } catch {}
+                await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(away.x, away.y, away.z), 10000);
+            } catch (err) { console.warn(`[BT] hazard avoid failed: ${err.message}`); }
             return true;
         });
     }
@@ -402,8 +420,8 @@ export class BehaviorTree {
                 try {
                     const pf = await import('mineflayer-pathfinder');
                     ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                    await ctx.bot.pathfinder.goto(new pf.goals.GoalNear(ally.pos.x, ally.pos.y, ally.pos.z, 3), true);
-                } catch {}
+                    await gotoWithTimeout(ctx.bot, new pf.goals.GoalNear(ally.pos.x, ally.pos.y, ally.pos.z, 3), 15000);
+                } catch (err) { console.warn(`[BT] assist goto failed: ${err.message}`); }
                 return true;
             }),
             new AsyncAction(async (ctx) => {
@@ -430,8 +448,8 @@ export class BehaviorTree {
                 try {
                     const pf = await import('mineflayer-pathfinder');
                     ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                    await ctx.bot.pathfinder.goto(new pf.goals.GoalNear(target.x, target.y, target.z, 5), true);
-                } catch {}
+                    await gotoWithTimeout(ctx.bot, new pf.goals.GoalNear(target.x, target.y, target.z, 5), 15000);
+                } catch (err) { console.warn(`[BT] explore goto failed: ${err.message}`); }
                 return true;
             }),
         ]);
@@ -455,7 +473,7 @@ export class BehaviorTree {
                     const pf = await import('mineflayer-pathfinder');
                     ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
                     const targetY = Math.max(0, ctx.bot.entity.position.y - 15);
-                    await ctx.bot.pathfinder.goto(new pf.goals.GoalBlock(ctx.bot.entity.position.x, targetY, ctx.bot.entity.position.z), true);
+                    await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(ctx.bot.entity.position.x, targetY, ctx.bot.entity.position.z), 20000);
                     await skills.collectBlock(ctx.bot, 'diamond_ore', 8);
                     return !ctx.bot.interrupt_code;
                 } catch { return false; }
@@ -501,7 +519,7 @@ export class BehaviorTree {
                     const pf = await import('mineflayer-pathfinder');
                     const chest = ctx.bot.findBlock({ matching: b => b.name === 'chest', maxDistance: 10 });
                     if (chest) {
-                        await ctx.bot.pathfinder.goto(new pf.goals.GoalNear(chest.position.x, chest.position.y, chest.position.z, 2), true);
+                        await gotoWithTimeout(ctx.bot, new pf.goals.GoalNear(chest.position.x, chest.position.y, chest.position.z, 2), 15000);
                         return true;
                     }
                     const below = ctx.bot.blockAt({ x: Math.floor(pos.x), y: Math.floor(pos.y) - 1, z: Math.floor(pos.z) });

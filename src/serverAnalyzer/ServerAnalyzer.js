@@ -13,6 +13,7 @@ import { DangerAnalyzer } from './DangerAnalyzer.js';
 import { RuleAnalyzer } from './RuleAnalyzer.js';
 import { LearningEngine } from './LearningEngine.js';
 import { SummaryEngine } from './SummaryEngine.js';
+import { ServerSemanticLayer } from './ServerSemanticLayer.js';
 
 export class ServerAnalyzer {
     constructor(agent) {
@@ -38,6 +39,7 @@ export class ServerAnalyzer {
         this.rules = new RuleAnalyzer(this.kb, this.log);
         this.learning = new LearningEngine(this.kb, this.log);
         this.summary = new SummaryEngine(this.kb, this.log);
+        this.semantics = new ServerSemanticLayer(this.kb, this.log);
 
         this._tickInterval = null;
         this._tickMs = 5000;
@@ -52,6 +54,14 @@ export class ServerAnalyzer {
         this.commands.start();
         this._tickInterval = setInterval(() => this._tick(), this._tickMs);
         this._boot();
+    }
+
+    /** When brain is active: observe commands from chat only — no bot.chat probes. */
+    setPassiveCommandDiscovery(on) {
+        this.commands?.setPassive?.(!!on);
+        if (on && this.commands?._running) {
+            this.commands.stop();
+        }
     }
 
     stop() {
