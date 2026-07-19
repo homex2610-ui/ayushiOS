@@ -146,7 +146,7 @@ const NEEDS = [
 ];
 
 export class ExecutiveBrain {
-  constructor(memory, personality, tom, bus) {
+  constructor(memory, personality, tom, bus, opts = {}) {
     this.memory = memory;
     this.personality = personality;
     this.tom = tom;
@@ -419,13 +419,43 @@ export class ExecutiveBrain {
     const extendedSnapshot = { ...snapshot, beliefs: this._buildBeliefs(snapshot) };
     const learning = this._deriveLearningAdjustment(extendedSnapshot);
     const planState = this._buildPlanState(extendedSnapshot);
-    const scored = NEEDS.map(n => ({
-      need: n.name,
-      score: n.score(extendedSnapshot, this.memory, this.personality, this.tom, this.lastInterruptedGoal, learning),
-      make: n.goal
-    })).sort((a, b) => b.score - a.score);
+    const suggestions = this.getSuggestions?.() || [];
 
-    // Repetition guard: if same need wins 4+ times in a row, deprioritize
+    const COOLDOWN_MS = { avoid_hazard: 12000, seek_safety: 8000, eat: 15000, build_base: 30000 };
+    const FAILURE_PENALTY_MS = 30000;
+    const FAILURE_PENALTY_SCORE = 0.7;
+    const _isInCooldown = (name) => {
+      const last = this._goalTimestamps[name];
+      return last && (Date.now() - last) < (COOLDOWN_MS[name] || 0);
+    };
+    const _hasRecentFailure = (name) => {
+      if (!this.lastFailure || this.lastFailure.taskName !== name) return false;
+      return (Date.now() - this.lastFailure.time) < FAILURE_PENALTY_MS;
+    };
+
+    let scored = NEEDS.map(n => {
+      const advisorBoost = 0;
+      let score = Math.min(1, n.score(extendedSnapshot, this.memory, this.personality, this.tom, this.lastInterruptedGoal, learning)
+        + advisorBoost);
+      if (_hasRecentFailure(n.name)) {
+        score = Math.max(0, score - FAILURE_PENALTY_SCORE);
+      }
+      return {
+        need: n.name,
+        score,
+        make: n.goal,
+        advisorBoost,
+      };
+    }).sort((a, b) => b.score - a.score);
+
+    // Cooldown: skip tasks that ran recently
+    const cooldownSkipped = scored.filter(s => _isInCooldown(s.need));
+    if (cooldownSkipped.length > 0) {
+      const nonCooldown = scored.filter(s => !_isInCooldown(s.need));
+      if (nonCooldown.length > 0) scored = nonCooldown;
+    }
+
+    // Repetition guard: if same need wins 4+ times in a row, add extra penalty
     const REPETITION_PENALTY_THRESHOLD = 4;
     const REPETITION_PENALTY = 0.3;
     for (const s of scored) {
