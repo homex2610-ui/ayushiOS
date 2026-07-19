@@ -16,27 +16,7 @@ export class SensoryCortex {
   constructor(bot, bus) {
     this.bot = bot;
     this.bus = bus;
-    this.recentChat = []; // auditory short buffer, filled by hooking chat events
-    this._hookAuditory();
-  }
-
-  _hookAuditory() {
-    this.bot.on('chat', (username, message) => {
-      if (username === this.bot.username) return;
-      const entry = { username, message, time: Date.now() };
-      this.recentChat.push(entry);
-      if (this.recentChat.length > 15) this.recentChat.shift();
-      this.bus.emit('heard_speech', entry);
-
-      const commandMatch = message.match(/\/(spawn|hub|warp|rtp|kit|home|shop)(?:\s+([A-Za-z0-9_\-/]+))?/i);
-      if (commandMatch) {
-        const command = commandMatch[0].toLowerCase();
-        this.bus.emit('server_command_seen', { command, args: commandMatch[2] ?? null, username, source: 'chat' });
-        if (commandMatch[1].toLowerCase() === 'warp' && commandMatch[2]) {
-          this.bus.emit('warp_spotted', { name: commandMatch[2], position: null, note: `Mentioned in chat by ${username}` });
-        }
-      }
-    });
+    this.recentChat = []; // auditory short buffer
   }
 
   getSnapshot() {
@@ -82,10 +62,6 @@ export class SensoryCortex {
     const hasDiamondTool = inventory.some(i => i.name.includes('diamond') && (i.name.includes('pickaxe') || i.name.includes('axe') || i.name.includes('sword')));
     const hasFood = inventory.some(i => i.name.includes('apple') || i.name.includes('bread') || i.name.includes('cooked') || i.name.includes('steak') || i.name.includes('pork') || i.name.includes('potato') || i.name.includes('carrot') || i.name.includes('beetroot') || i.name.includes('golden') || i.name.includes('mutton') || i.name.includes('rabbit') || i.name.includes('fish') || i.name.includes('beef') || i.name.includes('chicken') || i.name.includes('cookie') || i.name.includes('cake') || i.name.includes('pie') || i.name.includes('berry') || i.name.includes('melon') || i.name.includes('stew') || i.name.includes('soup') || i.name.includes('honey'));
     const hasOre = (ore) => inventory.some(i => i.name.includes(ore));
-    const hasCraftingTable = inventory.some(i => i.name === 'crafting_table');
-    const hasFurnace = inventory.some(i => i.name === 'furnace');
-    const hasChest = inventory.some(i => i.name === 'chest');
-    const hasBed = inventory.some(i => i.name.includes('bed'));
     const hasTorch = inventory.some(i => i.name === 'torch');
     const hasShield = inventory.some(i => i.name === 'shield');
     const hasWaterBucket = inventory.some(i => i.name === 'water_bucket');
@@ -102,6 +78,12 @@ export class SensoryCortex {
       const table = this.bot.findBlock({ matching: b => b.name === 'crafting_table' || b.name === 'furnace' || b.name === 'anvil' || b.name === 'enchanting_table', maxDistance: 10 });
       if (table) nearestWorkstation = { name: table.name, position: table.position };
     } catch (_) { /* pathfinder/world not loaded yet */ }
+
+    // Check both inventory and placed blocks nearby (placing removes from inventory)
+    const hasCraftingTable = inventory.some(i => i.name === 'crafting_table') || nearestWorkstation?.name === 'crafting_table';
+    const hasFurnace = inventory.some(i => i.name === 'furnace') || nearestWorkstation?.name === 'furnace';
+    const hasChest = inventory.some(i => i.name === 'chest') || nearestChest !== null;
+    const hasBed = inventory.some(i => i.name.includes('bed')) || nearestBed !== null;
 
     const currentPos = { x: Math.round(pos.x), y: Math.round(pos.y), z: Math.round(pos.z) };
     const snapshot = {
@@ -151,37 +133,6 @@ export class SensoryCortex {
       body: { inventory, equipped },
       recentChat: [...this.recentChat],
     };
-
-    if (nearestBed) {
-      this.bus.emit('landmark_spotted', {
-        name: nearestBed.name,
-        type: 'shelter',
-        position: nearestBed.position,
-        tags: ['bed', 'shelter'],
-        note: 'Nearby bed',
-        source: 'sensory',
-      });
-    }
-    if (nearestChest) {
-      this.bus.emit('landmark_spotted', {
-        name: nearestChest.name,
-        type: 'storage',
-        position: nearestChest.position,
-        tags: ['chest', 'storage'],
-        note: 'Nearby storage',
-        source: 'sensory',
-      });
-    }
-    if (nearestWorkstation) {
-      this.bus.emit('landmark_spotted', {
-        name: nearestWorkstation.name,
-        type: 'workstation',
-        position: nearestWorkstation.position,
-        tags: ['workstation', 'utility'],
-        note: 'Nearby workstation',
-        source: 'sensory',
-      });
-    }
 
     this.bus.emit('perception', snapshot);
     return snapshot;

@@ -71,6 +71,7 @@ export class Agent extends EventEmitter {
         this.taskRunner = null;
         this.brain = null;
         this.brainIsBusy = false;
+        this._busySince = 0;
 
         // Initialize components
         this.actions = new ActionManager(this);
@@ -142,6 +143,10 @@ export class Agent extends EventEmitter {
             if (this._disconnectHandled) return;
             this._disconnectHandled = true;
 
+            // Reset all busy flags before exit/reconnect
+            this._busySince = 0;
+            if (this.brain?.motor) this.brain.motor.isBusy = false;
+
             const { type } = handleDisconnection(this.name, reason);
 
             const navOnBot = this.bot && this.bot._navigationInProgress;
@@ -204,11 +209,19 @@ export class Agent extends EventEmitter {
 
                 this.worldKnowledge = new WorldKnowledge(this);
                 this.serverAnalyzer = new ServerAnalyzer(this);
+                const brainEnabled = settings.enable_brain !== false;
+                if (brainEnabled) {
+                    this.serverAnalyzer.setPassiveCommandDiscovery(true);
+                }
                 this.serverAnalyzer.start();
                 this.btServerIntel.attach(this.bot);
                 this.curiosityEngine = new CuriosityEngine(this);
-                if (settings.enable_curiosity !== false) this.curiosityEngine.start();
-                if (this.goalPlanner && settings.enable_goal_planner !== false) this.goalPlanner.start();
+                if (settings.enable_curiosity !== false) {
+                    this.curiosityEngine.start({ advisorMode: brainEnabled });
+                }
+                if (this.goalPlanner && settings.enable_goal_planner !== false) {
+                    this.goalPlanner.start({ advisorMode: brainEnabled });
+                }
 
                 // wait for a bit so stats are not undefined
                 await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -298,9 +311,10 @@ export class Agent extends EventEmitter {
                     console.log(`[Agent] ${npcHub ? 'Hub NPCs detected' : 'Not in survival'} (gameMode=${this.bot?.game?.gameMode}, state=${connectionManager.state}). Attempting to join survival...`);
 
                     // Ensure we're authenticated before sending server commands
-                    const pw = settings.password || 'KryonSecurePass1234';
-                    this.bot.chat(`/login ${pw}`);
-                    await new Promise(r => setTimeout(r, 2000));
+                    if (settings.auth !== 'offline' && settings.password) {
+                        this.bot.chat(`/login ${settings.password}`);
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
 
                     // Send survival join commands (no pathfinder — bot can't move on hub platforms)
                     const survivalCmds = ['/server survival', '/survival', '/join survival', '/smp'];
@@ -363,13 +377,17 @@ export class Agent extends EventEmitter {
                 if (settings.enable_brain !== false) {
                     try {
                         this.taskRunner = new TaskRunner(this.bot);
-                        this.brain = new AyushiOS(this.bot, this.taskRunner);
-                        this._syncServerAnalyzerKnowledgeToMemory();
-                        // Immediately mark motor as busy to prevent brain tasks from interfering with diamond grind
-                        if (this.brain && this.brain.motor) {
+                        this.brain = new AyushiOS(this.bot, this.taskRunner, {
+                            serverAnalyzer: this.serverAnalyzer,
+                        });
+                        this.serverAnalyzer?.setPassiveCommandDiscovery?.(true);
+                        this.curiosityEngine?.setAdvisorMode?.(true);
+                        this.goalPlanner?.setAdvisorMode?.(true);
+                        // If a task queue is loaded, mark motor busy to prevent interference
+                        if (this.brain && this.brain.motor && settings._taskSteps?.length > 0) {
                             this.brain.motor.isBusy = true;
                         }
-                        console.log('[AyushiOS] Brain booted — autonomous loop running (motor busy).');
+                        console.log('[AyushiOS] Brain booted — knowledge pipeline + advisors online.');
                     } catch (brainErr) {
                         console.error('[AyushiOS] Failed to boot brain:', brainErr.message);
                         this.brain = null;
@@ -506,27 +524,8 @@ export class Agent extends EventEmitter {
         this._processQueue();
     }
  
-    _syncServerAnalyzerKnowledgeToMemory() {
-        if (!this.brain?.memory || !this.serverAnalyzer?.kb) return;
-        const memory = this.brain.memory;
-        const commands = this.serverAnalyzer.kb.get('commands') || {};
-        for (const [command, meta] of Object.entries(commands)) {
-          memory.rememberServerCommand(command, { ...meta, source: 'serverAnalyzer' });
-        }
-        const npcs = this.serverAnalyzer.kb.get('npcs') || [];
-        const position = this.bot.entity?.position;
-        for (const npc of npcs) {
-          memory.rememberNPC(npc.name, npc.position || position, npc.type || 'npc', `Observed NPC from server analyzer`, npc.confidence || 0.6);
-        }
-        const guiMenus = this.serverAnalyzer.kb.get('guiMenus') || [];
-        for (const gui of guiMenus.slice(-10)) {
-          if (!position) continue;
-          memory.rememberWaypoint({
-            name: gui.title || 'Server GUI', type: 'gui', position,
-            tags: ['gui', 'server'], note: `Observed ${gui.itemCount || 0} items in ${gui.title || 'a server GUI'}`,
-            source: 'serverAnalyzer', confidence: 0.55,
-          });
-        }
+    _syncKnowledgeBridge(force = false) {
+        this.brain?.knowledgeBridge?.sync?.(force);
     }
 
     async _processQueue() {
@@ -603,8 +602,14 @@ export class Agent extends EventEmitter {
         const respondFunc = async (username, message) => {
             if (!message || message === "") return;
             this._lastHeartbeat = Date.now();
-            console.log('[CHAT] received:', username, '▶', message);
             if (username === this.name) return;
+            const dedupKey = `${username}:${message}`;
+            const now = Date.now();
+            const lastSeen = this._recentChats?.get(dedupKey);
+            if (lastSeen && now - lastSeen < 2000) return;
+            if (!this._recentChats) this._recentChats = new Map();
+            this._recentChats.set(dedupKey, now);
+            console.log('[CHAT] received:', username, '▶', message);
             const usernameLower = username.toLowerCase();
             if (settings.only_chat_with.length > 0 && !settings.only_chat_with.some(u => u.toLowerCase() === usernameLower)) return;
             if (ignore_messages.some((m) => message.startsWith(m))) return;
@@ -638,7 +643,7 @@ export class Agent extends EventEmitter {
             if (this.serverAnalyzer) {
                 this.serverAnalyzer.onChatMessage(translation);
                 if (username === MASTER_PLAYER) this.serverAnalyzer.setOwner(username);
-                if (this.brain?.memory) this._syncServerAnalyzerKnowledgeToMemory();
+                this._syncKnowledgeBridge(false);
             }
             if (this.relationshipManager) {
                 this.relationshipManager.recordMessage(username, translation);
@@ -658,10 +663,13 @@ export class Agent extends EventEmitter {
 
         this.bot.on('whisper', (username, message) => {
             this._whisperLast[username] = Date.now();
-            // Auto-accept /tpa from updesh on any whisper (teleport request may be toast, but catch it here too)
+            // Only auto-accept on actual teleport requests
             if (username.toLowerCase() === 'updesh' || username.toLowerCase() === 'updes') {
-                console.log(`[Agent] updesh whispered: "${message}" — sending /tpaccept`);
-                this.bot.chat('/tpaccept');
+                const lowerMsg = message.toLowerCase();
+                if (lowerMsg.includes('has requested to teleport') || lowerMsg.includes('wants to teleport') || lowerMsg.includes('teleport request') || lowerMsg.includes('/tpa')) {
+                    console.log(`[Agent] updesh teleport request via whisper: "${message}" — sending /tpaccept`);
+                    this.bot.chat('/tpaccept');
+                }
             }
             respondFunc(username, message);
         });
@@ -678,27 +686,29 @@ export class Agent extends EventEmitter {
             if (!plain) return;
             console.log(`[CHAT:${source}] ${plain}`);
 
-            // Auto-accept /tpa from updesh
+            // Auto-accept /tpa from updesh — only on actual teleport requests
             const lower = plain.toLowerCase();
-            if ((lower.includes('teleport') || lower.includes('tpa') || lower.includes('/tpaccept') || lower.includes('updesh') || lower.includes('updes'))) {
-                if (lower.includes('updesh') || lower.includes('updes')) {
-                    console.log(`[Agent] Auto-accepting teleport from updesh (${source})`);
+            if (lower.includes('updesh') || lower.includes('updes')) {
+                if (lower.includes('has requested to teleport') || lower.includes('wants to teleport') || lower.includes('teleport request from') || lower.includes('sent you a teleport request')) {
+                    console.log(`[Agent] Teleport request from updesh detected (${source}) — sending /tpaccept`);
                     this.bot.chat('/tpaccept');
                 }
             }
 
-            // Auto-auth: catch login/register prompts that AuthHandler's bot.on('message') might miss
-            if (this._lastAuthCheck && Date.now() - this._lastAuthCheck < 3000) { /* skip — rate limited */ }
-            else {
-                const pw = settings.password || 'KryonSecurePass1234';
-                if (lower.includes('login first') || lower.includes('please login') || lower.includes('not logged in') || lower.includes('authenticate') || lower.includes('type /login') || lower.includes('use /login')) {
-                    this._lastAuthCheck = Date.now();
-                    console.log(`[Agent] Auth prompt detected (${source}). Sending /login...`);
-                    this.bot.chat(`/login ${pw}`);
-                } else if (lower.includes('register') || lower.includes('not registered')) {
-                    this._lastAuthCheck = Date.now();
-                    console.log(`[Agent] Register prompt detected (${source}). Sending /register...`);
-                    this.bot.chat(`/register ${pw} ${pw}`);
+            // Auto-auth: only attempt on auth-required servers
+            if (settings.auth !== 'offline' && settings.password) {
+                if (this._lastAuthCheck && Date.now() - this._lastAuthCheck < 3000) { /* skip — rate limited */ }
+                else {
+                    const pw = settings.password;
+                    if (lower.includes('login first') || lower.includes('please login') || lower.includes('not logged in') || lower.includes('authenticate') || lower.includes('type /login') || lower.includes('use /login')) {
+                        this._lastAuthCheck = Date.now();
+                        console.log(`[Agent] Auth prompt detected (${source}). Sending /login...`);
+                        this.bot.chat(`/login ${pw}`);
+                    } else if (lower.includes('register') || lower.includes('not registered')) {
+                        this._lastAuthCheck = Date.now();
+                        console.log(`[Agent] Register prompt detected (${source}). Sending /register...`);
+                        this.bot.chat(`/register ${pw} ${pw}`);
+                    }
                 }
             }
 
@@ -735,7 +745,7 @@ export class Agent extends EventEmitter {
         this.bot.on('messagestr', (message) => {
             if (this.serverAnalyzer) {
                 this.serverAnalyzer.onChatMessage(message);
-                if (this.brain?.memory) this._syncServerAnalyzerKnowledgeToMemory();
+                this._syncKnowledgeBridge(false);
             }
             handleRawMessage('messagestr', message);
         });
@@ -751,19 +761,7 @@ export class Agent extends EventEmitter {
         this.bot.on('windowOpen', (window) => {
             if (this.serverAnalyzer) {
                 this.serverAnalyzer.onWindowOpen(window);
-                if (this.brain?.memory) {
-                    const pos = this.bot.entity?.position;
-                    this.brain.memory.rememberWaypoint({
-                        name: window?.title?.text || window?.title || 'GUI',
-                        type: 'gui',
-                        position: pos,
-                        tags: ['gui', 'server'],
-                        note: 'Observed server GUI',
-                        importance: 1,
-                        confidence: 0.5,
-                    });
-                    this._syncServerAnalyzerKnowledgeToMemory();
-                }
+                this._syncKnowledgeBridge(true);
             }
         });
  
@@ -906,7 +904,6 @@ export class Agent extends EventEmitter {
 
     clearBotLogs() {
         this.bot.output = '';
-        this.bot.interrupt_code = false;
     }
 
     shutUp() {
@@ -1228,6 +1225,11 @@ export class Agent extends EventEmitter {
             if (this.serverAnalyzer) {
                 this.serverAnalyzer.onDeath('death');
             }
+            // Clear stale goal state so we don't resume explore with far-away coords
+            if (this.brain?.executive) {
+                this.brain.executive.lastInterruptedGoal = null;
+                this.brain.executive.lastFailure = null;
+            }
         });
         this.bot.on('messagestr', async (message, _, jsonMsg) => {
             if (jsonMsg && jsonMsg.translate && jsonMsg.translate.startsWith('death') && message.startsWith(this.name)) {
@@ -1300,7 +1302,21 @@ export class Agent extends EventEmitter {
         if (this.actions.executing) return;
         if (!settings.bt_enabled) return;
         // [AyushiOS coexistence] Skip BT if brain's motor cortex is running an autonomous task
-        if (this.brain && this.brain.motor && this.brain.motor.isBusy) return;
+        if (this.brain && this.brain.motor && this.brain.motor.isBusy) {
+            const now = Date.now();
+            if (!this._busySince) this._busySince = now;
+            const isTaskBusy = settings._taskSteps?.length > 0;
+            const maxBusy = isTaskBusy ? 1200000 : 300000;
+            if (now - this._busySince > maxBusy) {
+                console.warn(`[Watchdog] motor.isBusy stale for ${((now - this._busySince)/1000).toFixed(0)}s — force-clearing`);
+                this.brain.motor.isBusy = false;
+                this._busySince = 0;
+            } else {
+                return;
+            }
+        } else {
+            this._busySince = 0;
+        }
 
         const state = this.btPerception.buildState(this.bot, this.btMemory, this.btServerIntel);
         if (!state) return;

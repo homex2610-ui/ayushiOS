@@ -533,21 +533,28 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
     const isLiquid = blockType === 'lava' || blockType === 'water';
 
     let collected = 0;
+    let noProgressCount = 0;
+    const failedPositions = [];
+    const beforeCount = world.getInventoryCounts(bot)[blockType] || 0;
 
     const movements = new pf.Movements(bot);
     movements.dontMineUnderFallingBlock = false;
     movements.dontCreateFlow = true;
 
     for (let i=0; i<num; i++) {
+        if (noProgressCount > 3) {
+            log(bot, `No progress after ${noProgressCount} attempts — giving up.`);
+            break;
+        }
         let blocks = world.getNearestBlocksWhere(bot, block => {
-            if (!blocktypes.includes(block.name)) {
+            if (!block || !block.position || !blocktypes.includes(block.name)) {
                 return false;
             }
-            if (exclude) {
-                for (let position of exclude) {
-                    if (block.position.x === position.x && block.position.y === position.y && block.position.z === position.z) {
-                        return false;
-                    }
+            const allExcludes = (exclude || []).concat(failedPositions);
+            for (let position of allExcludes) {
+                if (!position) continue;
+                if (block.position.x === position.x && block.position.y === position.y && block.position.z === position.z) {
+                    return false;
                 }
             }
             if (isLiquid) {
@@ -585,8 +592,14 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             log(bot, `Don't have right tools to harvest ${blockType}.`);
             return false;
         }
+        const invBefore = world.getInventoryCounts(bot)[blockType] || 0;
         try {
             let success = false;
+            if (!block.position) {
+                log(bot, `Block at unknown position, skipping.`);
+                failedPositions.push(block.position || {});
+                continue;
+            }
             if (isLiquid) {
                 success = await useToolOnBlock(bot, 'bucket', block);
             }
@@ -600,11 +613,20 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
                 success = true;
             }
             else {
-                await bot.collectBlock.collect(block);
+                try {
+                    await bot.collectBlock.collect(block);
+                } catch (_) {}
+                await new Promise(r => setTimeout(r, 200));
+                await pickupNearbyItems(bot);
                 success = true;
             }
-            if (success)
+            const invAfter = world.getInventoryCounts(bot)[blockType] || 0;
+            if (success && invAfter > invBefore) {
                 collected++;
+                noProgressCount = 0;
+            } else {
+                noProgressCount++;
+            }
             await autoLight(bot);
         }
         catch (err) {
@@ -614,6 +636,10 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             }
             else {
                 log(bot, `Failed to collect ${blockType}: ${err}.`);
+                noProgressCount++;
+                failedPositions.push(block.position);
+                if (bot.interrupt_code) break;
+                await new Promise(r => setTimeout(r, 100));
                 continue;
             }
         }
@@ -621,8 +647,9 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
         if (bot.interrupt_code)
             break;  
     }
-    log(bot, `Collected ${collected} ${blockType}.`);
-    return collected > 0;
+    const afterCount = world.getInventoryCounts(bot)[blockType] || 0;
+    log(bot, `Collected ${afterCount - beforeCount} ${blockType}.`);
+    return (afterCount - beforeCount) > 0;
 }
 
 export async function pickupNearbyItems(bot) {
@@ -634,10 +661,14 @@ export async function pickupNearbyItems(bot) {
      * await skills.pickupNearbyItems(bot);
      **/
     const distance = 8;
-    const getNearestItem = bot => bot.nearestEntity(entity => entity.name === 'item' && bot.entity.position.distanceTo(entity.position) < distance);
+    const getNearestItem = bot => {
+        if (!bot.entity || !bot.entity.position) return null;
+        return bot.nearestEntity(entity => entity.name === 'item' && bot.entity.position.distanceTo(entity.position) < distance);
+    };
     let nearestItem = getNearestItem(bot);
     let pickedUp = 0;
-    while (nearestItem) {
+    let maxPickupIterations = 5;
+    while (nearestItem && pickedUp < maxPickupIterations) {
         let movements = new pf.Movements(bot);
         movements.canDig = false;
         bot.pathfinder.setMovements(movements);
@@ -855,11 +886,15 @@ export async function placeBlock(bot, blockType, x, y, z, placeOn='bottom', dont
     const dont_move_for = ['torch', 'redstone_torch', 'redstone', 'lever', 'button', 'rail', 'detector_rail', 
         'powered_rail', 'activator_rail', 'tripwire_hook', 'tripwire', 'water_bucket', 'string'];
     if (!dont_move_for.includes(item_name) && (pos.distanceTo(targetBlock.position) < 1.1 || pos_above.distanceTo(targetBlock.position) < 1.1)) {
-        // too close
+        // too close — step back
         let goal = new pf.goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 2);
         let inverted_goal = new pf.goals.GoalInvert(goal);
         bot.pathfinder.setMovements(new pf.Movements(bot));
-        await bot.pathfinder.goto(inverted_goal);
+        try {
+            await goToGoal(bot, inverted_goal, 10000);
+        } catch (err) {
+            log(bot, `Could not move back from block: ${err.message}`);
+        }
     }
     if (bot.entity.position.distanceTo(targetBlock.position) > 4.5) {
         // too far
@@ -1173,14 +1208,64 @@ export async function giveToPlayer(bot, itemType, username, num=1) {
     return false;
 }
 
-export async function goToGoal(bot, goal) {
+const GOTO_TIMEOUT_MS = 30000;
+
+function extractGoalInfo(goal) {
+    if (!goal) return { type: 'unknown', pos: null };
+    let type = goal.constructor?.name || 'unknown';
+    let pos = null;
+    let followTarget = null;
+    if (goal.x != null && goal.z != null) {
+        pos = { x: goal.x, y: goal.y ?? 0, z: goal.z };
+    }
+    if (goal.target) {
+        followTarget = {
+            name: goal.target.name || goal.target.username || 'entity',
+            pos: goal.target.position ? { x: goal.target.position.x, y: goal.target.position.y, z: goal.target.position.z } : null,
+        };
+    }
+    return { type, pos, followTarget };
+}
+
+function computeGoalDistance(bot, goal) {
+    try {
+        const info = extractGoalInfo(goal);
+        const botPos = bot.entity?.position;
+        if (!botPos) return null;
+        if (info.pos) return Math.round(botPos.distanceTo({ x: info.pos.x, y: info.pos.y, z: info.pos.z }));
+        if (info.followTarget?.pos) return Math.round(botPos.distanceTo(info.followTarget.pos));
+        return null;
+    } catch { return null; }
+}
+
+function cancelNavigation(bot) {
+    try { bot.pathfinder?.setGoal?.(null); } catch (_) {}
+    try { bot.pathfinder?.stop?.(); } catch (_) {}
+}
+
+export class GotoTimeoutError extends Error {
+    constructor({ timeout, goal, distance, elapsed }) {
+        const info = goal ? extractGoalInfo(goal) : { type: 'unknown', pos: null };
+        const posStr = info.pos ? ` @(${info.pos.x},${info.pos.y},${info.pos.z})` : '';
+        const distStr = distance != null ? ` dist=${distance}` : '';
+        super(`goto timeout: ${info.type}${posStr}${distStr} timeout=${timeout}ms${elapsed != null ? ` elapsed=${elapsed}ms` : ''}`);
+        this.name = 'GotoTimeoutError';
+    }
+}
+
+export async function goToGoal(bot, goal, timeout = GOTO_TIMEOUT_MS) {
     /**
      * Navigate to the given goal. Use doors and attempt minimally destructive movements.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
      * @param {pf.goals.Goal} goal, the goal to navigate to.
+     * @param {number} [timeout=30000] timeout in ms. Use -1 for no timeout.
      **/
 
     const nonDestructiveMovements = new pf.Movements(bot);
+    const info = extractGoalInfo(goal);
+    const dist = computeGoalDistance(bot, goal);
+    log(bot, `Navigating to ${info.type}${info.pos ? ` @(${info.pos.x},${info.pos.y},${info.pos.z})` : ''}${info.followTarget ? ` -> ${info.followTarget.name}` : ''}${dist != null ? ` [${dist}m]` : ''} timeout=${timeout}ms`);
+
     const dontBreakBlocks = ['glass', 'glass_pane'];
     for (let block of dontBreakBlocks) {
         nonDestructiveMovements.blocksCantBreak.add(mc.getBlockId(block));
@@ -1205,15 +1290,33 @@ export async function goToGoal(bot, goal) {
     }
 
     const doorCheckInterval = startDoorInterval(bot);
+    const startTime = Date.now();
+    const distance = computeGoalDistance(bot, goal);
 
     bot.pathfinder.setMovements(final_movements);
     try {
-        await bot.pathfinder.goto(goal);
+        let gotoPromise = bot.pathfinder.goto(goal);
+        if (timeout > 0) {
+            gotoPromise = Promise.race([
+                gotoPromise,
+                new Promise((_, reject) =>
+                    setTimeout(() => {
+                        const elapsed = Date.now() - startTime;
+                        cancelNavigation(bot);
+                        reject(new GotoTimeoutError({ timeout, goal, distance, elapsed }));
+                    }, timeout)
+                ),
+            ]);
+        }
+        await gotoPromise;
         clearInterval(doorCheckInterval);
         return true;
     } catch (err) {
         clearInterval(doorCheckInterval);
-        // we need to catch so we can clean up the door check interval, then rethrow the error
+        cancelNavigation(bot);
+        const elapsed = Date.now() - startTime;
+        if (err.name === 'GotoTimeoutError') throw err;
+        err.message = `${err.message} | goal=${extractGoalInfo(goal).type} dist=${distance ?? '?'} elapsed=${elapsed}ms`;
         throw err;
     }
 }
@@ -1320,7 +1423,7 @@ export async function goToPosition(bot, x, y, z, min_distance=2) {
     };
     
     const progressInterval = setInterval(checkDigProgress, 1000);
-    
+
     try {
         await goToGoal(bot, new pf.goals.GoalNear(x, y, z, min_distance));
         clearInterval(progressInterval);
@@ -1428,7 +1531,7 @@ export async function goToPlayer(bot, username, distance=3) {
     distance = Math.max(distance, 0.5);
     const goal = new pf.goals.GoalFollow(player, distance);
 
-    await goToGoal(bot, goal, true);
+    await goToGoal(bot, goal);
 
     log(bot, `You have reached ${username}.`);
 }
@@ -1544,8 +1647,13 @@ export async function moveAwayFromEntity(bot, entity, distance=16) {
     let goal = new pf.goals.GoalFollow(entity, distance);
     let inverted_goal = new pf.goals.GoalInvert(goal);
     bot.pathfinder.setMovements(new pf.Movements(bot));
-    await bot.pathfinder.goto(inverted_goal);
-    return true;
+    try {
+        await goToGoal(bot, inverted_goal, 15000);
+        return true;
+    } catch (err) {
+        log(bot, `Could not move away from ${entity.name || 'entity'}: ${err.message}`);
+        return false;
+    }
 }
 
 export async function avoidEnemies(bot, distance=16) {
@@ -1626,6 +1734,7 @@ export async function useDoor(bot, door_pos=null) {
         return false;
     }
 
+    log(bot, `Navigating to door @(${door_pos.x}, ${door_pos.y}, ${door_pos.z}).`);
     bot.pathfinder.setGoal(new pf.goals.GoalNear(door_pos.x, door_pos.y, door_pos.z, 1));
     await new Promise((resolve) => setTimeout(resolve, 1000));
     while (bot.pathfinder.isMoving()) {
@@ -2316,12 +2425,12 @@ export async function stripMine(bot, length=20, direction=null) {
 }
 
 export async function buildShelter(bot, size=5) {
-    const pos = pos(bot).floored();
+    const here = pos(bot).floored();
     const blocks = ['oak_planks', 'cobblestone', 'dirt'];
     const inv = bot.inventory;
     let mat = blocks.find(b => inv.count(b) >= (size*size*2 + size*4));
     if (!mat) mat = blocks[blocks.length-1];
-    const floor = pos.offset(0, -1, 0);
+    const floor = here.offset(0, -1, 0);
     for (let x = -1; x <= size; x++) {
         for (let z = -1; z <= size; z++) {
             await placeBlock(bot, mat, floor.x + x, floor.y, floor.z + z);
@@ -2356,15 +2465,15 @@ export async function buildStaircase(bot, height=5, direction=null) {
 }
 
 export async function plantAndHarvest(bot, seedType=null, radius=4) {
-    const pos = pos(bot).floored();
+    const here = pos(bot).floored();
     let planted = 0;
     for (let x = -radius; x <= radius; x++) {
         for (let z = -radius; z <= radius; z++) {
-            const soil = bot.blockAt(pos.offset(x, -1, z));
+            const soil = bot.blockAt(here.offset(x, -1, z));
             if (!soil || soil.name !== 'farmland') continue;
-            const above = bot.blockAt(pos.offset(x, 0, z));
+            const above = bot.blockAt(here.offset(x, 0, z));
             if (above && above.name.includes('age')) {
-                await breakBlockAt(bot, pos.x + x, pos.y, pos.z + z);
+                await breakBlockAt(bot, here.x + x, here.y, here.z + z);
                 await pickupNearbyItems(bot);
                 planted++;
             }
@@ -2372,7 +2481,7 @@ export async function plantAndHarvest(bot, seedType=null, radius=4) {
                 const seed = bot.inventory.findInventoryItem(seedType);
                 if (!seed) break;
                 await bot.equip(seed, 'hand');
-                await bot.placeBlock(above || soil, new Vec3(pos.x + x, pos.y, pos.z + z));
+                await bot.placeBlock(above || soil, new Vec3(here.x + x, here.y, here.z + z));
             }
             if (bot.interrupt_code) return planted > 0;
         }
@@ -2416,16 +2525,16 @@ export async function buildNetherPortal(bot) {
     if (count < 10) { log(bot, `Need 10 obsidian, have ${count}.`); return false; }
     const lighter = bot.inventory.findInventoryItem('flint_and_steel') || bot.inventory.findInventoryItem('fire_charge');
     if (!lighter) { log(bot, 'Need flint and steel or fire charge.'); return false; }
-    const pos = pos(bot).floored();
+    const here = pos(bot).floored();
     for (let x = 0; x <= 3; x++) {
         for (let y = 0; y <= 4; y++) {
             if (x === 0 || x === 3 || y === 0 || y === 4)
-                await placeBlock(bot, 'obsidian', pos.x + x, pos.y + y, pos.z);
+                await placeBlock(bot, 'obsidian', here.x + x, here.y + y, here.z);
         }
     }
     await bot.equip(lighter, 'hand');
-    const inside = bot.blockAt(pos.offset(1, 1, 0));
-    if (inside) await bot.placeBlock(inside, pos.offset(1, 1, 0));
+    const inside = bot.blockAt(here.offset(1, 1, 0));
+    if (inside) await bot.placeBlock(inside, here.offset(1, 1, 0));
     await bot.activateItem();
     log(bot, 'Nether portal built.');
     return true;
@@ -2540,11 +2649,11 @@ export async function compostItems(bot) {
 export async function lightSurroundings(bot, radius=8) {
     const torches = bot.inventory.findInventoryItem('torch') || bot.inventory.findInventoryItem('soul_torch');
     if (!torches) { log(bot, 'No torches.'); return false; }
-    const pos = pos(bot).floored();
+    const here = pos(bot).floored();
     let placed = 0;
     for (let x = -radius; x <= radius; x += 3) {
         for (let z = -radius; z <= radius; z += 3) {
-            const check = pos.offset(x, 0, z);
+            const check = here.offset(x, 0, z);
             const block = bot.blockAt(check);
             if (block && block.name === 'air' && block.light < 8) {
                 const below = bot.blockAt(check.offset(0, -1, 0));
@@ -2601,10 +2710,10 @@ export async function harvestNearbyTrees(bot, range=16) {
 export async function plantSaplings(bot, count=5) {
     const sapling = bot.inventory.items().find(i => i.name.includes('sapling'));
     if (!sapling) { log(bot, 'No saplings.'); return false; }
-    const pos = pos(bot).floored();
+    const here = pos(bot).floored();
     let planted = 0;
     for (let i = 0; i < count; i++) {
-        const p = new Vec3(pos.x + Math.floor(Math.random()*5-2), pos.y, pos.z + Math.floor(Math.random()*5-2));
+        const p = new Vec3(here.x + Math.floor(Math.random()*5-2), here.y, here.z + Math.floor(Math.random()*5-2));
         if (bot.blockAt(p)?.name === 'air' && bot.blockAt(p.offset(0, -1, 0))?.name !== 'air') {
             await placeBlock(bot, sapling.name, p.x, p.y, p.z);
             planted++;
