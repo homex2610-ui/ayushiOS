@@ -8,6 +8,9 @@
 // ─────────────────────────────────────────────────────────────
 
 import { THRESHOLDS } from './config.js';
+import { HTNPlanner } from './HTNPlanner.js';
+import { taskNames } from '../domain/tasks.js';
+import { resolveCapability, getRelevantCapabilities } from './capabilities.js';
 
 const NEEDS = [
   {
@@ -52,15 +55,52 @@ const NEEDS = [
   {
     name: 'craft_gear',
     score: (s) => {
-      if (s.equipment.hasDiamondArmor) return 0;
-      if (s.equipment.hasIronArmor) return 0.4;
-      const hasIron = s.resources.hasOre('iron_ingot') || s.resources.hasOre('raw_iron');
-      const hasDiamond = s.resources.hasOre('diamond');
-      if (hasDiamond) return 0.9;
-      if (hasIron) return 0.7;
-      return 0.35;
+      const relevant = getRelevantCapabilities(s);
+      const inv = s.resources?.inventory || [];
+      const env = s.environment || {};
+      const placedBlocks = [];
+      if (env.nearestChest) placedBlocks.push('chest');
+      if (env.nearestWorkstation?.name === 'crafting_table') placedBlocks.push('crafting_table');
+      if (env.nearestWorkstation?.name === 'furnace') placedBlocks.push('furnace');
+      if (env.nearestBed) placedBlocks.push('bed');
+
+      let maxScore = 0;
+      for (const capName of relevant) {
+        const result = resolveCapability(inv, capName, placedBlocks);
+        if (!result.satisfied) {
+          const isStone = capName === 'canMineStone';
+          const isFight = capName === 'canFight';
+          const isIron = capName === 'canMineIron';
+          if (isStone && result.steps.length <= 4) maxScore = Math.max(maxScore, 0.5);
+          if (isFight && result.steps.length <= 4) maxScore = Math.max(maxScore, 0.4);
+          if (isIron) maxScore = Math.max(maxScore, 0.35);
+        }
+      }
+      return maxScore;
     },
     goal: () => ({ name: 'craft_gear', task: 'craft_gear', params: {} })
+  },
+  {
+    name: 'advance_capability',
+    score: (s, m, p, tom, lastInterruptedGoal, learning) => {
+      if (s.threats.length > 0 || s.vitality.health < THRESHOLDS.healthLow) return 0;
+      if (s.vitality.food < THRESHOLDS.foodLow) return 0;
+      const relevant = getRelevantCapabilities(s);
+      const inv = s.resources?.inventory || [];
+      const env = s.environment || {};
+      const placedBlocks = [];
+      if (env.nearestChest) placedBlocks.push('chest');
+      if (env.nearestWorkstation?.name === 'crafting_table') placedBlocks.push('crafting_table');
+      if (env.nearestWorkstation?.name === 'furnace') placedBlocks.push('furnace');
+      let unsatisfiedCount = 0;
+      for (const capName of relevant) {
+        const result = resolveCapability(inv, capName, placedBlocks);
+        if (!result.satisfied) unsatisfiedCount++;
+      }
+      if (unsatisfiedCount === 0) return 0;
+      return Math.min(0.65, 0.25 + unsatisfiedCount * 0.15 - (learning?.failureCaution || 0));
+    },
+    goal: () => ({ name: 'advance_capability', task: 'advance_capability', params: {} })
   },
   {
     name: 'build_base',
@@ -111,13 +151,25 @@ export class ExecutiveBrain {
     this.personality = personality;
     this.tom = tom;
     this.bus = bus;
+    this.knowledge = opts.knowledge || null;
+    this.trace = opts.trace || null;
+    this.getSuggestions = opts.getSuggestions || (() => []);
+    this.getPlannerHints = opts.getPlannerHints || (() => ({}));
     this.lastInterruptedGoal = null;
     this.lastSelectedNeed = null;
     this.currentGoal = null;
     this.lastFailure = null;
+    this._goalTimestamps = {};
+    this.htnPlanner = new HTNPlanner();
+    this._htnTasks = new Set(taskNames());
+    this._htnTasks.delete('eat');
+    this._htnTasks.delete('socialize');
+    this._lastPlanContext = null;
+    this._lastDecisions = [];
+    this._decisionCount = {};
 
-    this.bus?.on('task_started', ({ taskName, steps }) => {
-      this.currentGoal = { name: taskName, task: taskName, steps };
+    this.bus?.on('task_started', ({ taskName, steps, context }) => {
+      this.currentGoal = { name: taskName, task: taskName, steps, context: context || null };
     });
     this.bus?.on('task_failed', ({ taskName, error }) => {
       if (this.currentGoal) {
@@ -126,9 +178,19 @@ export class ExecutiveBrain {
       this.lastFailure = { taskName, error, time: Date.now() };
       this.memory?.recordFailure?.(taskName, error);
     });
+    this.bus?.on('task_interrupted', ({ taskName }) => {
+      if (this.currentGoal) {
+        this.lastInterruptedGoal = this.currentGoal;
+      }
+      this.lastFailure = { taskName, error: 'interrupted', time: Date.now() };
+    });
     this.bus?.on('task_completed', () => {
       this.lastInterruptedGoal = null;
       this.lastFailure = null;
+    });
+    this.bus?.on('task_resumed', ({ taskName, context }) => {
+      this.currentGoal = { name: taskName, task: taskName, steps: context?.steps || [], context };
+      this.lastInterruptedGoal = null;
     });
   }
 
@@ -215,6 +277,7 @@ export class ExecutiveBrain {
       case 'seek_safety': return this._planSeekSafety(state);
       case 'eat': return this._planEat(state);
       case 'craft_gear': return this._planCraftGear(state);
+      case 'advance_capability': return this._planAdvanceCapability(state);
       case 'build_base': return this._planBuildBase(state);
       case 'visit_known_warp': return this._planVisitWarp(state);
       case 'farm_food': return this._planFarmFood(state);
@@ -254,43 +317,32 @@ export class ExecutiveBrain {
         { skill: 'eat', params: { minFoodLevel: THRESHOLDS.foodComfortable } }
       ];
     }
+    // Hunt animals first (more reliable than unknown crops)
     return [
-      { skill: 'collect', params: { item: state.beliefs.foodItem || 'carrot', count: 4 } },
+      { skill: 'combat', params: { entityType: 'animal', range: 20, count: 2, stopOnHealth: 3 } },
       { skill: 'eat', params: { minFoodLevel: THRESHOLDS.foodComfortable } }
     ];
   }
 
   _planCraftGear(state) {
-    if (state.equipment?.hasDiamondArmor) return [];
-    if (state.equipment?.hasIronArmor) {
-      return [{ skill: 'equip', params: { item: 'iron_chestplate', slot: 'torso' } }];
+    const inv = state.resources?.inventory || [];
+    const env = state.environment || {};
+    const placedBlocks = [];
+    if (env.nearestChest) placedBlocks.push('chest');
+    if (env.nearestWorkstation?.name === 'crafting_table') placedBlocks.push('crafting_table');
+    if (env.nearestWorkstation?.name === 'furnace') placedBlocks.push('furnace');
+
+    for (const capName of getRelevantCapabilities(state)) {
+      const result = resolveCapability(inv, capName, placedBlocks);
+      if (!result.satisfied && result.steps.length > 0) {
+        return result.steps;
+      }
     }
-    if (state.planning.ironIngotCount >= 8) {
-      return [
-        { skill: 'craft', params: { item: 'iron_chestplate', count: 1 } },
-        { skill: 'craft', params: { item: 'iron_leggings', count: 1 } },
-        { skill: 'craft', params: { item: 'iron_boots', count: 1 } },
-        { skill: 'equip', params: { item: 'iron_chestplate', slot: 'torso' } }
-      ];
-    }
-    if (state.planning.rawIronCount >= 4 && state.planning.hasFurnace) {
-      return [
-        { skill: 'smelt', params: { input: 'raw_iron', count: Math.min(8, state.planning.rawIronCount), fuel: 'coal' } },
-        { skill: 'craft', params: { item: 'iron_chestplate', count: 1 } }
-      ];
-    }
-    if (state.beliefs?.nearestSafeBase && state.planning.rawIronCount > 0) {
-      return [
-        { skill: 'move_to', params: { x: state.beliefs.nearestSafeBase.position.x, y: state.beliefs.nearestSafeBase.position.y, z: state.beliefs.nearestSafeBase.position.z, range: 4 } },
-        { skill: 'smelt', params: { input: 'raw_iron', count: Math.min(8, state.planning.rawIronCount), fuel: 'coal' } },
-        { skill: 'craft', params: { item: 'iron_chestplate', count: 1 } }
-      ];
-    }
-    return [
-      { skill: 'collect', params: { item: 'raw_iron', count: 8 } },
-      { skill: 'smelt', params: { input: 'raw_iron', count: 8, fuel: 'coal' } },
-      { skill: 'craft', params: { item: 'iron_chestplate', count: 1 } }
-    ];
+    return [];
+  }
+
+  _planAdvanceCapability(state) {
+    return this._planCraftGear(state);
   }
 
   _planBuildBase(state) {
@@ -373,19 +425,34 @@ export class ExecutiveBrain {
       make: n.goal
     })).sort((a, b) => b.score - a.score);
 
+    // Repetition guard: if same need wins 4+ times in a row, deprioritize
+    const REPETITION_PENALTY_THRESHOLD = 4;
+    const REPETITION_PENALTY = 0.3;
+    for (const s of scored) {
+      const consecutiveWins = this._decisionCount[s.need] || 0;
+      if (consecutiveWins >= REPETITION_PENALTY_THRESHOLD) {
+        s.score = Math.max(0, s.score - REPETITION_PENALTY);
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+
     const top = scored[0];
     if (!this.personality.allowsRiskyTasks() && ['explore_unknown', 'socialize', 'visit_known_warp'].includes(top.need)) {
       const safer = scored.find(s => s.need === 'seek_safety') || scored[1] || top;
       this.bus?.emit('goal_selected', { need: safer.need, score: safer.score, vetoed: top.need });
       const goal = safer.make(extendedSnapshot, this.memory, this.personality, this.tom, this.lastInterruptedGoal);
+      for (const n of NEEDS) this._decisionCount[n.name] = (n.name === safer.need) ? (this._decisionCount[n.name] || 0) + 1 : 0;
       this.lastSelectedNeed = safer.need;
+      this._goalTimestamps[safer.need] = Date.now();
       const steps = this._planGoal(goal, planState);
       this.bus?.emit('plan_composed', { goal: goal.name, steps });
       return { task: goal.task || goal.name, steps };
     }
 
     const goal = top.make(extendedSnapshot, this.memory, this.personality, this.tom, this.lastInterruptedGoal);
+    for (const n of NEEDS) this._decisionCount[n.name] = (n.name === top.need) ? (this._decisionCount[n.name] || 0) + 1 : 0;
     this.lastSelectedNeed = top.need;
+    this._goalTimestamps[top.need] = Date.now();
     const steps = this._planGoal(goal, planState);
     this.bus?.emit('goal_selected', { need: top.need, score: top.score });
     this.bus?.emit('plan_composed', { goal: goal.name, steps });
