@@ -51,6 +51,7 @@ export function getBlockAtPosition(bot, x=0, y=0, z=0) {
      * let blockBelow = world.getBlockAtPosition(bot, 0, -1, 0);
      * let blockAbove = world.getBlockAtPosition(bot, 0, 2, 0); since minecraft position is at the feet
      **/
+    if (!bot?.entity?.position) return {name: 'air'};
     let block = bot.blockAt(bot.entity.position.offset(x, y, z));
     if (!block) block = {name: 'air'};
        
@@ -138,22 +139,31 @@ export function getNearestBlocks(bot, block_types=null, distance=8, count=10000)
             block_ids.push(mc.getBlockId(block_type));
         }
     }
-    return getNearestBlocksWhere(bot, block_ids, distance, count);  
+    // ID-array matchers run inside findBlocks itself (no position-less
+    // matcher blocks involved); still repair .position for consistency.
+    let positions = bot.findBlocks({matching: block_ids, maxDistance: distance, count});
+    let blocks = positions.map(position => {
+        const b = bot.blockAt(position);
+        if (b && !b.position) b.position = position;
+        return b;
+    }).filter(b => b !== null);
+    return blocks;
 }
 
 export function getNearestBlocksWhere(bot, predicate, distance=8, count=10000) {
     /**
      * Get a list of the nearest blocks that satisfy the given predicate.
-     * @param {Bot} bot - The bot to get the nearest blocks for.
-     * @param {function} predicate - The predicate to filter the blocks.
-     * @param {number} distance - The maximum distance to search, default 16.
-     * @param {number} count - The maximum number of blocks to find, default 10000.
-     * @returns {Block[]} - The nearest blocks that satisfy the given predicate.
-     * @example
-     * let waterBlocks = world.getNearestBlocksWhere(bot, block => block.name === 'water', 16, 10);
-     **/
+     * NOTE (P0 fix): on the FastClient/Fabric stack, mineflayer invokes the
+     * matcher with Block objects that LACK .position (assigned only after
+     * selection). We therefore repair .position here from the iteration
+     * coordinate so downstream code (exclusions, navigation, digging) works.
+     */
     let positions = bot.findBlocks({matching: predicate, maxDistance: distance, count: count});
-    let blocks = positions.map(position => bot.blockAt(position)).filter(b => b !== null);
+    let blocks = positions.map(position => {
+        const b = bot.blockAt(position);
+        if (b && !b.position) b.position = position;
+        return b;
+    }).filter(b => b !== null);
     return blocks;
 }
 

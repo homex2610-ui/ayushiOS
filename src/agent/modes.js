@@ -125,10 +125,20 @@ const modes_list = [
                 say(agent, 'I\'m stuck!');
                 this.stuck_time = 0;
                 execute(this, agent, async () => {
-                    const crashTimeout = setTimeout(() => { agent.cleanKill("Got stuck and couldn't get unstuck") }, 10000);
-                    await skills.moveAway(bot, 5);
-                    clearTimeout(crashTimeout);
-                    say(agent, 'I\'m free.');
+                    // Try physical unstick first.
+                    try { await skills.moveAway(bot, 5); } catch {}
+                    // If still wedged, FAIL THE CURRENT TASK instead of killing
+                    // the process — process death loses all in-flight state
+                    // (blacklists, plans, navigation) and caused restart storms.
+                    // The brain's failure model handles a dead task fine.
+                    const stillStuck = agent.bot.entity.position.distanceTo(this.prev_location || agent.bot.entity.position) < this.distance;
+                    if (stillStuck) {
+                        console.warn('[Modes] Unstick failed — aborting current task (process stays alive)');
+                        agent.taskRunner?.requestInterrupt?.();
+                        bot.interrupt_code = true;
+                        agent.actions?.stop?.().catch?.(() => {});
+                    }
+                    say(agent, 'Moving on.');
                 });
             }
             this.last_time = Date.now();
@@ -164,6 +174,8 @@ const modes_list = [
         on: true,
         active: false,
         update: async function (agent) {
+            // At low HP don't trade punches — let cowardice flee instead.
+            if ((agent.bot.health ?? 20) <= 9) return;
             const enemy = world.getNearestEntityWhere(agent.bot, entity => mc.isHostile(entity), 8);
             if (enemy && await world.isClearPath(agent.bot, enemy)) {
                 execute(this, agent, async () => {
@@ -203,6 +215,13 @@ const modes_list = [
                 execute(this, agent, async () => {
                     say(agent, `Hunting ${huntable.name}!`);
                     await skills.attackEntity(agent.bot, huntable);
+                    // Loot the kill: grab nearby item drops so hunts actually feed her
+                    await new Promise(r => setTimeout(r, 1000));
+                    const drop = world.getNearestEntityWhere(agent.bot,
+                        e => e.isValid && (e.displayName === 'Item' || e.name === 'item'), 16);
+                    if (drop) {
+                        try { await skills.goToPosition(agent.bot, drop.position.x, drop.position.y, drop.position.z); } catch {}
+                    }
                 });
             }
         }

@@ -20,10 +20,10 @@ const RULE_PATTERNS = [
 ];
 
 const CLAIM_PATTERNS = [
-    { re: /(?:claim|unclaim|trust|unturest)/i, type: 'griefprevention' },
+    { re: /(?:claim|unclaim|trust|untrust)/i, type: 'griefprevention' },
     { re: /(?:lands|land)\s*(?:claim|create)/i, type: 'lands' },
     { re: /(?:town|towny|nation|resident)/i, type: 'towny' },
-    { re: /(?:faction|f)/i, type: 'factions' },
+    { re: /\bfactions?\b/i, type: 'factions' },
     { re: /(?:res|residence)/i, type: 'residence' },
 ];
 

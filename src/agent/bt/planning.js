@@ -1,8 +1,8 @@
 
 const RECIPES = {
     wooden_pickaxe: [
-        { id: 'gather_wood', need: 'oak_log', qty: 3, from: 'gather', nextAction: 'gather', target: 'wood' },
-        { id: 'craft_planks', need: 'oak_planks', qty: 4, from: 'craft', nextAction: 'craft', params: { recipe: 'oak_planks', qty: 4 } },
+        { id: 'gather_wood', need: 'log', qty: 3, from: 'gather', nextAction: 'gather', target: 'wood' },
+        { id: 'craft_planks', need: 'planks', qty: 4, from: 'craft', nextAction: 'craft', params: { recipe: 'planks', qty: 4 } },
         { id: 'craft_sticks', need: 'stick', qty: 2, from: 'craft', nextAction: 'craft', params: { recipe: 'stick', qty: 2 } },
         { id: 'craft_wooden_pickaxe', need: 'wooden_pickaxe', qty: 1, from: 'craft', nextAction: 'craft', params: { recipe: 'wooden_pickaxe', qty: 1 } },
     ],
@@ -14,8 +14,8 @@ const RECIPES = {
     ],
 
     iron_gear: [
-        { id: 'gather_wood', need: 'oak_log', qty: 5, from: 'gather', nextAction: 'gather', target: 'wood' },
-        { id: 'craft_planks', need: 'oak_planks', qty: 8, from: 'craft', nextAction: 'craft', params: { recipe: 'oak_planks', qty: 8 } },
+        { id: 'gather_wood', need: 'log', qty: 5, from: 'gather', nextAction: 'gather', target: 'wood' },
+        { id: 'craft_planks', need: 'planks', qty: 8, from: 'craft', nextAction: 'craft', params: { recipe: 'planks', qty: 8 } },
         { id: 'craft_sticks', need: 'stick', qty: 4, from: 'craft', nextAction: 'craft', params: { recipe: 'stick', qty: 4 } },
         { id: 'craft_wooden_pickaxe', need: 'wooden_pickaxe', qty: 1, from: 'craft', nextAction: 'craft', params: { recipe: 'wooden_pickaxe', qty: 1 } },
         { id: 'gather_cobblestone', need: 'cobblestone', qty: 8, from: 'gather', nextAction: 'gather', target: 'cobblestone' },
@@ -28,8 +28,8 @@ const RECIPES = {
     ],
 
     diamond_gear: [
-        { id: 'gather_wood', need: 'oak_log', qty: 8, from: 'gather', nextAction: 'gather', target: 'wood' },
-        { id: 'craft_planks', need: 'oak_planks', qty: 12, from: 'craft', nextAction: 'craft', params: { recipe: 'oak_planks', qty: 12 } },
+        { id: 'gather_wood', need: 'log', qty: 8, from: 'gather', nextAction: 'gather', target: 'wood' },
+        { id: 'craft_planks', need: 'planks', qty: 12, from: 'craft', nextAction: 'craft', params: { recipe: 'planks', qty: 12 } },
         { id: 'craft_iron_pickaxe', need: 'iron_pickaxe', qty: 1, from: 'craft', nextAction: 'craft', params: { recipe: 'iron_pickaxe', qty: 1 }, requires: ['iron_ingot'] },
         { id: 'gather_diamond', need: 'diamond', qty: 3, from: 'mine_diamond', nextAction: 'gather', target: 'diamond' },
         { id: 'craft_diamond_sword', need: 'diamond_sword', qty: 1, from: 'craft', nextAction: 'craft', params: { recipe: 'diamond_sword', qty: 1 } },
@@ -37,8 +37,8 @@ const RECIPES = {
     ],
 
     food_setup: [
-        { id: 'gather_wood', need: 'oak_log', qty: 5, from: 'gather', nextAction: 'gather', target: 'wood' },
-        { id: 'craft_planks', need: 'oak_planks', qty: 8, from: 'craft', nextAction: 'craft', params: { recipe: 'oak_planks', qty: 8 } },
+        { id: 'gather_wood', need: 'log', qty: 5, from: 'gather', nextAction: 'gather', target: 'wood' },
+        { id: 'craft_planks', need: 'planks', qty: 8, from: 'craft', nextAction: 'craft', params: { recipe: 'planks', qty: 8 } },
         { id: 'craft_wooden_hoe', need: 'wooden_hoe', qty: 1, from: 'craft', nextAction: 'craft', params: { recipe: 'wooden_hoe', qty: 1 } },
         { id: 'find_seeds', need: 'wheat_seeds', qty: 3, from: 'gather', nextAction: 'gather', target: 'wheat_seeds' },
         { id: 'farm_wheat', need: 'wheat', qty: 20, from: 'farm', nextAction: 'farm', params: { crop: 'wheat', qty: 20 } },
@@ -46,8 +46,8 @@ const RECIPES = {
     ],
 
     shelter: [
-        { id: 'gather_wood', need: 'oak_log', qty: 10, from: 'gather', nextAction: 'gather', target: 'wood' },
-        { id: 'craft_planks', need: 'oak_planks', qty: 20, from: 'craft', nextAction: 'craft', params: { recipe: 'oak_planks', qty: 20 } },
+        { id: 'gather_wood', need: 'log', qty: 10, from: 'gather', nextAction: 'gather', target: 'wood' },
+        { id: 'craft_planks', need: 'planks', qty: 20, from: 'craft', nextAction: 'craft', params: { recipe: 'planks', qty: 20 } },
         { id: 'craft_door', need: 'oak_door', qty: 1, from: 'craft', nextAction: 'craft', params: { recipe: 'oak_door', qty: 1 } },
         { id: 'build_shelter', need: 'shelter', qty: 1, from: 'build', nextAction: 'buildShelter', params: { size: 5 } },
     ],

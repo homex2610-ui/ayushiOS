@@ -7,10 +7,11 @@ const PATTERNS = [
         type: Intent.FOLLOW,
         confidence: IntentConfidence.HIGH,
         patterns: [
-            /^(come|follow|goto|go to|come here|come to me|follow me)\b/i,
+            /^(come|follow|goto|come here|come to me|follow me)\b/i,
             /^come\s+(here|to\s+me|with\s+me)/i,
             /^follow\s+(me|updesh)/i,
-            /^(lets?\s+)?go\b/i,
+            // bare "go"/"let's go" follows the master — but "go to <place>" is a MOVE intent
+            /^(lets?\s+)?go\b(?!\s+to\s)/i,
             /^teleport\s+to\s+me/i,
             /^tp\s+to\s+me/i
         ]
@@ -19,16 +20,20 @@ const PATTERNS = [
         type: Intent.GIVE_ITEM,
         confidence: IntentConfidence.HIGH,
         patterns: [
-            /^(give|gimme|give me|hand me|drop)\s+(\d+\s+)?(\w+)/i,
-            /^(i\s+)?need\s+(\d+\s+)?(\w+)/i,
-            /^can\s+(i|you)\s+(have|get|give)\s+(\d+\s+)?(\w+)/i
+            /^(give|gimme|give me|hand me|drop)\s+(?:\d+\s+)?(.+)/i,
+            /^(i\s+)?need\s+(?:\d+\s+)?(.+)/i,
+            /^can\s+(i|you)\s+(have|get|give)\s+(?:\d+\s+)?(.+)/i
         ],
         extract: (match) => {
             const str = match[0];
             const countMatch = str.match(/(\d+)/);
-            const itemMatch = str.match(/(?:give|gimme|give me|hand me|drop|need|have|get)\s+(?:\d+\s+)?(.+)/i);
+            // Strip the verb phrase, then any dangling pronoun ("give ME 5 bread" -> "bread")
+            let rest = str
+                .replace(/^(give\s+me|gimme|hand\s+me|can\s+i|can\s+you|i\s+)?\s*(give|hand|drop|need|have|get)\b\s*/i, '')
+                .replace(/^(me|us|them)\b\s*/i, '')
+                .replace(/^\d+\s*/, '');
             return {
-                item: itemMatch ? itemMatch[1].trim() : 'unknown',
+                item: rest.trim() || 'unknown',
                 count: countMatch ? parseInt(countMatch[1]) : 1
             };
         }
@@ -209,6 +214,31 @@ const QUICK_REPLIES = {
 export class IntentParser {
     constructor() {
         this._patterns = PATTERNS;
+        // P1 light-context slots: last concrete subject/place mentioned by
+        // the master. Lets "it / that / there / same thing" resolve to real
+        // targets instead of failing. Deliberately simple — no coreference
+        // chains, just slot memory.
+        this.context = { subject: null, place: null };
+    }
+
+    _rememberContext(intent, params) {
+        const nouns = ['item', 'block', 'mob', 'crop', 'structure', 'resource'];
+        for (const k of nouns) {
+            if (params[k] && typeof params[k] === 'string' && !/^(unknown|it|that)$/i.test(params[k])) {
+                this.context.subject = params[k];
+            }
+        }
+        if (intent === Intent.MOVE && params.target && !/^(me|updesh|there)$/i.test(params.target)) {
+            this.context.place = params.target;
+        }
+        if (params.place && typeof params.place === 'string') {
+            this.context.place = params.place;
+        }
+    }
+
+    /** Contextual fallback for a missing plan param. */
+    _ctx(kind) {
+        return kind === 'place' ? this.context.place : this.context.subject;
     }
 
     parse(message) {
@@ -219,7 +249,22 @@ export class IntentParser {
             for (const pattern of rule.patterns) {
                 const match = clean.match(pattern);
                 if (match) {
-                    const params = rule.extract ? rule.extract(match) : {};
+                    let params = rule.extract ? rule.extract(match) : {};
+                    // P1: anaphora injection — "mine it" / "craft that" /
+                    // "go back there" reuse the last remembered subject/place.
+                    const wantsAnaphora = /\b(it|that|them|same thing|there|back)\b/i.test(clean);
+                    if (wantsAnaphora) {
+                        params = { ...params };
+                        if ((rule.type === Intent.MINE || rule.type === Intent.COLLECT) && !params.block && !params.resource && this.context.subject) {
+                            params.block = this.context.subject;
+                            params.resource = this.context.subject;
+                        } else if (rule.type === Intent.CRAFT && !params.item && this.context.subject) {
+                            params.item = this.context.subject;
+                        } else if (rule.type === Intent.MOVE && params.target && /^(there|back)$/i.test(params.target) && this.context.place) {
+                            params.target = this.context.place;
+                        }
+                    }
+                    this._rememberContext(rule.type, params);
                     return new IntentResult(rule.type, rule.confidence, params, clean);
                 }
             }
@@ -254,64 +299,62 @@ export class IntentParser {
     }
 
     generatePlan(intent, params) {
+        // NOTE 1: every command here must exist in src/agent/commands/{actions,queries}.js.
+        // NOTE 2: steps use the parser's function-call grammar "!name(\"str\", 123)" —
+        // space-separated args are NOT parsed by parseCommandMessage(). TaskQueue
+        // pre-validates each step against the real registry before running it.
+        const q = (s) => `"${String(s).replace(/"/g, '')}"`;
         const plans = {
-            [Intent.FOLLOW]: () => [`!goToPlayer ${params.target || 'updesh'}`],
+            [Intent.FOLLOW]: () => [`!goToPlayer(${q(params.target || 'updesh')}, 1)`],
             [Intent.GIVE_ITEM]: () => {
                 const count = params.count || 1;
                 const item = params.item || 'unknown';
-                return [`!givePlayer updesh ${item} ${count}`];
+                return [`!givePlayer(${q('updesh')}, ${q(item)}, ${count})`];
             },
             [Intent.BUILD]: () => {
                 const structure = params.structure || 'unknown';
                 if (structure.includes('farm') || structure.includes('wheat')) {
                     return [
-                        '!collectBlocks dirt 64',
-                        '!craft hoe',
-                        '!craft bucket',
-                        '!tillLand',
-                        '!plantSeeds',
-                        '!placeWater'
+                        '!collectBlocks("dirt", 32)',
+                        '!plantAndHarvest("wheat_seeds")'
                     ];
                 }
-                if (structure.includes('house') || structure.includes('base') || structure.includes('shelter')) {
-                    return [
-                        '!collectBlocks wood 64',
-                        '!collectBlocks cobblestone 64',
-                        '!build structure'
-                    ];
-                }
-                return [`!build ${structure}`];
+                return ['!buildShelter(5)'];
             },
             [Intent.MINE]: () => {
-                const block = params.block || 'stone';
+                const block = params.block || this._ctx('subject') || 'stone';
                 const count = params.count || 64;
-                return [`!collectBlocks ${block} ${count}`];
+                return [`!collectBlocks(${q(block)}, ${count})`];
             },
             [Intent.CRAFT]: () => {
-                const item = params.item || 'unknown';
-                return [`!craft ${item}`];
+                const item = params.item || this._ctx('subject') || 'unknown';
+                return [`!craftRecipe(${q(item)}, 1)`];
             },
             [Intent.FARM]: () => {
                 const crop = params.crop || 'wheat';
+                const seeds = crop === 'wheat' ? 'wheat_seeds' : `${crop}_seeds`;
                 return [
-                    '!collectBlocks dirt 64',
-                    '!tillLand',
-                    `!plantSeeds ${crop}`,
-                    '!placeWater'
+                    '!collectBlocks("dirt", 16)',
+                    `!plantAndHarvest(${q(seeds)})`
                 ];
             },
             [Intent.COLLECT]: () => {
-                const resource = params.resource || 'resources';
-                return [`!collectBlocks ${resource} 64`];
+                const resource = params.resource || params.block || this._ctx('subject') || 'resources';
+                return [`!collectBlocks(${q(resource)}, 64)`];
             },
             [Intent.FIGHT]: () => {
-                return ['!equipSword', '!attack nearest'];
+                const mob = params.mob || 'zombie';
+                return ['!equip("iron_sword")', `!attack(${q(mob)})`];
             },
             [Intent.MOVE]: () => {
-                return [`!goToPlayer ${params.target || 'updesh'}`];
+                const target = params.target || 'updesh';
+                // Player names route to !goToPlayer; anything else is treated as
+                // a remembered place (fails gracefully if not saved).
+                if (/^(me|updesh)$/i.test(target)) return ['!goToPlayer("updesh", 1)'];
+                return [`!goToRememberedPlace(${q(target)})`];
             },
             [Intent.SLEEP]: () => {
-                return ['!sleep'];
+                return ['!goToBed'];
             },
             [Intent.STOP]: () => {
                 return ['!stop'];
@@ -320,7 +363,9 @@ export class IntentParser {
                 return [];
             },
             [Intent.INSPECT]: () => {
-                return ['!stats', '!inventory'];
+                // Inspect-style requests are answered by the LLM/BT layer, not
+                // by canned command sequences.
+                return [];
             },
             [Intent.TASK_STATUS]: () => {
                 return [];

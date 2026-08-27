@@ -14,7 +14,9 @@ export class ActionManager {
     }
 
     async resumeAction(actionFn, timeout) {
-        return this._executeResume(actionFn, timeout);
+        // Forward with an explicit null label — passing actionFn positionally
+        // would land it in the label slot and timeout in the actionFn slot.
+        return this._executeResume(null, actionFn, timeout);
     }
 
     async runAction(actionLabel, actionFn, { timeout, resume = false } = {}) {
@@ -61,6 +63,9 @@ export class ActionManager {
     async _executeAction(actionLabel, actionFn, timeout = 10) {
         let TIMEOUT;
         try {
+            // `timedout` is a per-action flag — stale `true` from a previous
+            // timeout must not leak into this action's result.
+            this.timedout = false;
             if (this.executing) {
                 const sameAction = actionLabel === this.currentActionLabel || actionLabel === this._lastExecutedLabel;
                 const now = Date.now();

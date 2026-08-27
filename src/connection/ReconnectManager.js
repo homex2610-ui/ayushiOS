@@ -1,5 +1,14 @@
 import CONNECTION_CONFIG from './ConnectionSettings.js';
 
+// P1 ARCHITECTURE NOTE — recovery topology:
+//  • In-process reconnect (this class) is DORMANT by design today: on kick,
+//    agent.js exits (connection_auto_reconnect) and AgentProcess restarts the
+//    whole child, which re-runs ConnectionManager.selectTarget → spawn.
+//    That is the production recovery path.
+//  • This class remains available for in-process recovery experiments and
+//    emits `recovery.reconnect_attempt` telemetry so a future dashboard can
+//    visualize either path. Do not wire both paths simultaneously.
+
 export class ReconnectManager {
     constructor() {
         this._attempts = 0;
@@ -68,6 +77,7 @@ export class ReconnectManager {
     reset() {
         this._attempts = 0;
         this._lastReconnect = 0;
+        this._exiting = false;
     }
 
     cancel() {

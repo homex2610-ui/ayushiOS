@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ayushi Vision Bot</title>
+<script src="/socket.io/socket.io.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#090b10;--s1:#11141c;--s2:#181c28;--s3:#1e2333;--brd:#282e42;--muted:#6b7394;--txt:#d8e0f4;--accent:#7c5cff;--grn:#26c976;--amb:#f0a020;--red:#f04060;--blue:#3b82f6;--cyan:#20d0e8;--purple:#a78bfa}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;overflow-x:hidden}
+.mono{font-family:'JetBrains Mono',monospace}
+
+/* ── Top Bar ───────────────────────────────────────────── */
+.topbar{position:sticky;top:0;z-index:100;background:rgba(9,11,16,.96);backdrop-filter:blur(12px);border-bottom:1px solid var(--brd);padding:10px 16px;display:flex;align-items:center;gap:12px}
+.topbar .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.topbar .dot.on{background:var(--grn);box-shadow:0 0 10px rgba(38,201,118,.5);animation:blink 2s infinite}
+.topbar .dot.off{background:var(--red)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.topbar h1{font-size:15px;font-weight:700;letter-spacing:.02em}
+.topbar .spacer{flex:1}
+.topbar .tag{font-size:10px;text-transform:uppercase;letter-spacing:.1em;padding:4px 8px;border-radius:999px;border:1px solid var(--brd);color:var(--muted);background:var(--s1)}
+.topbar .tag.live{color:var(--grn);border-color:rgba(38,201,118,.3);background:rgba(38,201,118,.06)}
+.topbar .time{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+
+/* ── Layout ────────────────────────────────────────────── */
+.wrap{max-width:1100px;margin:0 auto;padding:12px 14px 60px}
+.row{display:grid;gap:10px;margin-bottom:10px}
+.row-4{grid-template-columns:repeat(4,1fr)}
+.row-3{grid-template-columns:repeat(3,1fr)}
+.row-2{grid-template-columns:1fr 1fr}
+.row-23{grid-template-columns:2fr 1fr}
+.row-32{grid-template-columns:1fr 2fr}
+@media(max-width:800px){.row-4,.row-3,.row-2,.row-23,.row-32{grid-template-columns:1fr}}
+
+/* ── Card ──────────────────────────────────────────────── */
+.card{background:var(--s2);border:1px solid var(--brd);border-radius:12px;overflow:hidden}
+.card .ch{padding:8px 12px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between}
+.card .ch h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.card .cb{padding:10px 12px}
+
+/* ── Status Row ────────────────────────────────────────── */
+.status-pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:5px 10px;border-radius:999px;border:1px solid var(--brd)}
+.status-pill.acting{color:var(--grn);border-color:rgba(38,201,118,.3);background:rgba(38,201,118,.06)}
+.status-pill.thinking{color:var(--amb);border-color:rgba(240,160,32,.3);background:rgba(240,160,32,.06)}
+.status-pill.chatting{color:var(--blue);border-color:rgba(59,130,246,.3);background:rgba(59,130,246,.06)}
+.status-pill.stopped{color:var(--red);border-color:rgba(240,64,96,.3);background:rgba(240,64,96,.06)}
+.status-pill.idle{color:var(--muted)}
+.status-pill .spinner{width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1s infinite}
+
+/* ── KPI Boxes ─────────────────────────────────────────── */
+.kpi{text-align:center;padding:8px}
+.kpi .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.kpi .val{font-size:20px;font-weight:700;margin-top:2px}
+.kpi .sub{font-size:10px;color:var(--muted);margin-top:1px}
+.kpi .bar{height:4px;background:var(--bg);border-radius:999px;margin-top:6px;overflow:hidden}
+.kpi .bar i{display:block;height:100%;border-radius:999px;transition:width .5s}
+.kpi .bar.health i{background:var(--grn)}
+.kpi .bar.hunger i{background:var(--amb)}
+.kpi .bar.xp i{background:var(--accent)}
+
+/* ── Inventory ─────────────────────────────────────────── */
+.inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:4px}
+.inv-slot{background:var(--s1);border:1px solid var(--brd);border-radius:6px;aspect-ratio:1;display:grid;place-items:center;position:relative}
+.inv-slot img{width:28px;height:28px;image-rendering:pixelated}
+.inv-slot .count{position:absolute;bottom:1px;right:3px;font-size:9px;font-weight:700;text-shadow:0 0 4px #000}
+.inv-slot.equip{border-color:var(--accent);box-shadow:0 0 6px rgba(124,92,255,.3)}
+
+/* ── Equipment Row ─────────────────────────────────────── */
+.equip-row{display:flex;gap:6px;justify-content:center}
+.equip-slot{width:40px;height:40px;background:var(--s1);border:1px solid var(--brd);border-radius:8px;display:grid;place-items:center}
+.equip-slot img{width:26px;height:26px;image-rendering:pixelated}
+.equip-slot .elbl{position:absolute;margin-top:42px;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+
+/* ── Log ────────────────────────────────────────────────── */
+#log{max-height:260px;overflow-y:auto;scroll-behavior:smooth}
+#log::-webkit-scrollbar{width:4px}
+#log::-webkit-scrollbar-thumb{background:var(--brd);border-radius:999px}
+.log-entry{padding:4px 0;border-bottom:1px solid rgba(40,46,66,.3);font-size:11px;line-height:1.4;display:flex;gap:6px}
+.log-entry .ts{color:var(--muted);font-family:'JetBrains Mono',monospace;flex-shrink:0;font-size:10px}
+.log-entry .msg{word-break:break-word}
+.log-entry.info .msg{color:var(--txt)}
+.log-entry.action .msg{color:var(--grn)}
+.log-entry.warn .msg{color:var(--amb)}
+.log-entry.error .msg{color:var(--red)}
+.log-entry.chat .msg{color:var(--cyan)}
+.log-entry.brain .msg{color:var(--purple)}
+
+/* ── Nearby Entities ───────────────────────────────────── */
+.entity-list{display:flex;flex-wrap:wrap;gap:4px}
+.entity-tag{font-size:10px;padding:3px 7px;border-radius:999px;border:1px solid var(--brd);background:var(--s1)}
+.entity-tag.hostile{color:var(--red);border-color:rgba(240,64,96,.3);background:rgba(240,64,96,.06)}
+.entity-tag.passive{color:var(--grn);border-color:rgba(38,201,118,.3);background:rgba(38,201,118,.06)}
+.entity-tag.player{color:var(--blue);border-color:rgba(59,130,246,.3);background:rgba(59,130,246,.06)}
+.entity-tag.item{color:var(--amb);border-color:rgba(240,160,32,.3);background:rgba(240,160,32,.06)}
+
+/* ── Brain Panel ────────────────────────────────────────── */
+.brain-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.brain-cell{background:var(--s1);border:1px solid var(--brd);border-radius:8px;padding:6px 8px}
+.brain-cell .bl{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.brain-cell .bv{font-size:12px;font-weight:600;margin-top:2px;font-family:'JetBrains Mono',monospace}
+
+/* ── Surroundings Bar ──────────────────────────────────── */
+.surr-row{display:flex;gap:8px;font-size:11px}
+.surr-row .sitem{display:flex;align-items:center;gap:4px}
+.surr-row .sitem img{width:16px;height:16px;image-rendering:pixelated}
+
+/* ── 2D Map ────────────────────────────────────────────── */
+#mapcanvas{width:100%;height:220px;background:var(--bg);border:1px solid var(--brd);border-radius:8px;display:block}
+</style>
+</head>
+<body>
+
+<!-- ═══ Top Bar ═══ -->
+<div class="topbar">
+  <div class="dot" id="connDot"></div>
+  <h1>Ayushi Vision</h1>
+  <div class="spacer"></div>
+  <span class="tag" id="dimTag">—</span>
+  <span class="tag" id="biomeTag">—</span>
+  <span class="tag" id="timeTag">—</span>
+  <span class="time mono" id="clockTag">--:--</span>
+</div>
+
+<div class="wrap">
+
+<!-- ═══ Status + KPIs ═══ -->
+<div class="row row-4">
+  <div class="card" style="grid-column:span 2">
+    <div class="cb" style="display:flex;align-items:center;gap:14px">
+      <div id="statusPill" class="status-pill idle">Idle</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700" id="actionText">—</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="actionSub"></div>
+      </div>
+    </div>
+  </div>
+  <div class="card kpi">
+    <div class="lbl">Health</div>
+    <div class="val" id="healthVal">—</div>
+    <div class="bar health"><i id="healthBar" style="width:0%"></i></div>
+  </div>
+  <div class="card kpi">
+    <div class="lbl">Hunger</div>
+    <div class="val" id="hungerVal">—</div>
+    <div class="bar hunger"><i id="hungerBar" style="width:0%"></i></div>
+  </div>
+</div>
+
+<!-- ═══ Position + Surroundings + Map ═══ -->
+<div class="row row-23">
+  <div class="card">
+    <div class="ch"><h2>Position</h2></div>
+    <div class="cb">
+      <div class="mono" style="font-size:13px" id="posText">—</div>
+      <div class="surr-row" style="margin-top:6px">
+        <span class="sitem">Below: <span id="surrBelow">—</span></span>
+        <span class="sitem">Legs: <span id="surrLegs">—</span></span>
+        <span class="sitem">Head: <span id="surrHead">—</span></span>
+      </div>
+      <div style="margin-top:8px">
+        <canvas id="mapcanvas"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><h2>Nearby</h2></div>
+    <div class="cb">
+      <div class="entity-list" id="entityList"><span style="color:var(--muted);font-size:11px">Scanning…</span></div>
+      <div style="margin-top:8px;font-size:10px;color:var(--muted)">
+        <span id="playerCount">0</span> players · <span id="botCount">0</span> bots
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Inventory + Brain ═══ -->
+<div class="row row-2">
+  <div class="card">
+    <div class="ch"><h2>Inventory</h2><span class="mono" style="font-size:10px;color:var(--muted)" id="invCount">—</span></div>
+    <div class="cb">
+      <div class="equip-row" style="margin-bottom:8px" id="equipRow"></div>
+      <div class="inv-grid" id="invGrid"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><h2>Brain</h2></div>
+    <div class="cb">
+      <div class="brain-grid" id="brainGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Live Log ═══ -->
+<div class="card">
+  <div class="ch"><h2>Live Feed</h2><span class="mono" style="font-size:10px;color:var(--muted)" id="logCount">0 entries</span></div>
+  <div class="cb" id="log" style="font-family:'JetBrains Mono',monospace"></div>
+</div>
+
+</div><!-- /wrap -->
+
+<script>
+// ══════════════════════════════════════════════════════════
+// Vision Bot — connects to MindServer, renders live state
+// ══════════════════════════════════════════════════════════
+const HOST = location.hostname || 'localhost';
+const PORT = 8080;
+const socket = io(`http://${HOST}:${PORT}`);
+
+const $ = s => document.getElementById(s);
+const logEl = $('log');
+let logCount = 0;
+const MAX_LOG = 200;
+const HOSTILES = new Set(['zombie','skeleton','spider','creeper','enderman','witch','slime','phantom','drowned','husk','stray','cave_spider','blaze','ghast','magma_cube','wither_skeleton','piglin_brute','vindicator','evoker','pillager','ravager','vex','guardian','elder_guardian','warden']);
+const PASSIVE = new Set(['cow','sheep','pig','chicken','horse','donkey','rabbit','fox','wolf','cat','parrot','villager','axolotl','bee','frog','camel','sniffer','armadillo','breeze']);
+
+// ── Connection ──────────────────────────────────────
+socket.on('connect', () => {
+  $('connDot').className = 'dot on';
+  addLog('info', 'Connected to MindServer');
+  socket.emit('listen-to-agents');
+});
+socket.on('disconnect', () => {
+  $('connDot').className = 'dot off';
+  addLog('error', 'Disconnected from MindServer');
+});
+
+// ── Agent List ──────────────────────────────────────
+let agentName = null;
+socket.on('agents-status', (agents) => {
+  const ayu = agents.find(a => a.name.includes('ayushi') || a.name.includes('Ayushi'));
+  if (ayu) agentName = ayu.name;
+  else if (agents.length > 0) agentName = agents[0].name;
+});
+
+// ── State Update ────────────────────────────────────
+socket.on('state-update', (states) => {
+  if (!agentName || !states[agentName]) return;
+  const s = states[agentName];
+  if (s.error) { addLog('error', `State error: ${s.error}`); return; }
+  renderState(s);
+});
+
+function renderState(s) {
+  // ── Tags ──
+  const gp = s.gameplay || {};
+  $('dimTag').textContent = gp.dimension || '—';
+  $('biomeTag').textContent = gp.biome || '—';
+  const tod = gp.timeOfDay || 0;
+  const hh = Math.floor((tod / 1000 + 6) % 24);
+  const mm = String(Math.floor((tod % 1000) / 1000 * 60)).padStart(2,'0');
+  $('timeTag').textContent = `${gp.timeLabel || '—'} ${hh}:${mm}`;
+  $('clockTag').textContent = new Date().toLocaleTimeString();
+
+  // ── Status ──
+  const act = s.action || {};
+  const tp = s.taskProgress || {};
+  const pill = $('statusPill');
+  pill.className = `status-pill ${act.kind || 'idle'}`;
+  const spinner = act.kind === 'acting' ? '<span class="spinner"></span>' : '';
+  pill.innerHTML = `${spinner}${act.current || 'Idle'}`;
+  $('actionText').textContent = act.current || 'Idle';
+  $('actionSub').textContent = tp.stepIndex !== undefined
+    ? `Step ${tp.stepIndex + 1}/${tp.stepTotal} — ${tp.currentStep?.skill || tp.currentStep?.action || ''}`
+    : act.kind === 'acting' ? 'Executing skill…' : act.kind === 'thinking' ? 'Processing…' : act.kind === 'chatting' ? 'Social mode' : '';
+
+  // ── KPIs ──
+  const hp = gp.health ?? 0;
+  const fd = gp.hunger ?? 0;
+  $('healthVal').textContent = hp;
+  $('healthBar').style.width = `${(hp/20)*100}%`;
+  $('healthVal').style.color = hp <= 6 ? 'var(--red)' : hp <= 12 ? 'var(--amb)' : 'var(--grn)';
+  $('hungerVal').textContent = fd;
+  $('hungerBar').style.width = `${(fd/20)*100}%`;
+  $('hungerVal').style.color = fd <= 6 ? 'var(--red)' : fd <= 14 ? 'var(--amb)' : 'var(--grn)';
+
+  // ── Position ──
+  const p = gp.position || {x:0,y:0,z:0};
+  $('posText').textContent = `${p.x.toFixed(1)}  ${p.y.toFixed(1)}  ${p.z.toFixed(1)}`;
+
+  // ── Surroundings ──
+  const sr = s.surroundings || {};
+  const blockImg = name => name === 'air' ? '⬜' : `<img src="/assets/item/${encodeURIComponent(agentName||'ayushi')}/${encodeURIComponent(name)}.png" onerror="this.replaceWith(document.createTextNode('⬜'))">`;
+  $('surrBelow').innerHTML = blockImg(sr.below);
+  $('surrLegs').innerHTML = blockImg(sr.legs);
+  $('surrHead').innerHTML = blockImg(sr.head);
+
+  // ── Entities ──
+  const nr = s.nearby || {};
+  const el = $('entityList');
+  el.innerHTML = '';
+  const allE = [
+    ...(nr.humanPlayers||[]).map(n => ({name:n, kind:'player'})),
+    ...(nr.botPlayers||[]).map(n => ({name:n, kind:'player'})),
+    ...(nr.entityTypes||[]).map(n => ({
+      name: n,
+      kind: HOSTILES.has(n) ? 'hostile' : PASSIVE.has(n) ? 'passive' : 'item'
+    }))
+  ];
+  if (allE.length === 0) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:11px">Nothing nearby</span>';
+  } else {
+    allE.forEach(e => {
+      const t = document.createElement('span');
+      t.className = `entity-tag ${e.kind}`;
+      t.textContent = e.name;
+      el.appendChild(t);
+    });
+  }
+  $('playerCount').textContent = (nr.humanPlayers||[]).length;
+  $('botCount').textContent = (nr.botPlayers||[]).length;
+
+  // ── Inventory ──
+  const inv = s.inventory || {};
+  const counts = inv.counts || {};
+  const eq = inv.equipment || {};
+  const equipSlots = [
+    {pos:'helmet', label:'Head'},
+    {pos:'chestplate', label:'Chest'},
+    {pos:'leggings', label:'Legs'},
+    {pos:'boots', label:'Feet'},
+    {pos:'mainHand', label:'Hand'}
+  ];
+  $('equipRow').innerHTML = equipSlots.map(sl => {
+    const name = eq[sl.pos];
+    return `<div class="equip-slot" title="${sl.label}: ${name||'empty'}">${
+      name ? `<img src="/assets/item/${encodeURIComponent(agentName||'ayushi')}/${encodeURIComponent(name)}.png" onerror="this.style.display='none'">` : '<span style="color:var(--muted);font-size:9px">—</span>'
+    }</div>`;
+  }).join('');
+
+  const entries = Object.entries(counts).filter(([,c])=>c>0).sort((a,b)=>b[1]-a[1]);
+  $('invCount').textContent = `${entries.reduce((s,[,c])=>s+c,0)} items`;
+  $('invGrid').innerHTML = entries.slice(0,36).map(([name,count]) => {
+    const isEq = Object.values(eq).includes(name);
+    return `<div class="inv-slot${isEq?' equip':''}" title="${name}"><img src="/assets/item/${encodeURIComponent(agentName||'ayushi')}/${encodeURIComponent(name)}.png" onerror="this.style.display='none'"><span class="count">${count>1?count:''}</span></div>`;
+  }).join('');
+
+  // ── Brain ──
+  const br = s.brain || {};
+  const bg = $('brainGrid');
+  const cells = [];
+  if (br.neural) {
+    const nn = br.neural;
+    cells.push(['Danger', nn.danger ?? '—', nn.danger > 0.6 ? 'var(--red)' : nn.danger > 0.3 ? 'var(--amb)' : 'var(--grn)']);
+    cells.push(['Hunger Risk', nn.hungerRisk ?? '—', nn.hungerRisk > 0.5 ? 'var(--amb)' : 'var(--txt)']);
+    cells.push(['Readiness', nn.readiness ?? '—', 'var(--accent)']);
+    cells.push(['Train Steps', nn.trainSteps ?? 0, 'var(--cyan)']);
+  }
+  if (br.quantum) {
+    cells.push(['Quantum', br.quantum, 'var(--purple)']);
+  }
+  if (br.actionMemory) {
+    cells.push(['Action Mem', `${br.actionMemory.entries} entries`, 'var(--blue)']);
+  }
+  if (br.sensorCount) {
+    cells.push(['Sensors', `${br.sensorCount} features`, 'var(--muted)']);
+  }
+  bg.innerHTML = cells.map(([l,v,c]) =>
+    `<div class="brain-cell"><div class="bl">${l}</div><div class="bv" style="color:${c}">${v}</div></div>`
+  ).join('') || '<div style="color:var(--muted);font-size:11px">No brain data</div>';
+
+  // ── Mini Map ──
+  drawMap(p, allE, sr);
+
+  // ── Log action changes ──
+  if (act.current && act.kind === 'acting') {
+    addLog('action', `► ${act.current}`);
+  }
+}
+
+// ── 2D Mini Map ─────────────────────────────────────
+let mapHistory = [{x:0,z:0}];
+function drawMap(pos, entities, surr) {
+  const canvas = $('mapcanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.clientWidth;
+  const H = canvas.clientHeight;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+
+  // Track history
+  const last = mapHistory[mapHistory.length-1];
+  if (Math.abs(pos.x - last.x) > 0.5 || Math.abs(pos.z - last.z) > 0.5) {
+    mapHistory.push({x:pos.x, z:pos.z});
+    if (mapHistory.length > 500) mapHistory.shift();
+  }
+
+  // Draw
+  ctx.fillStyle = '#0a0d14';
+  ctx.fillRect(0, 0, W, H);
+
+  const SCALE = 3; // pixels per block
+  const cx = W/2, cy = H/2;
+
+  // Grid
+  ctx.strokeStyle = 'rgba(40,46,66,0.4)';
+  ctx.lineWidth = 0.5;
+  const gridSize = 16;
+  const offX = (pos.x % gridSize) * SCALE;
+  const offZ = (pos.z % gridSize) * SCALE;
+  for (let x = -cx; x <= cx; x += gridSize*SCALE) {
+    ctx.beginPath(); ctx.moveTo(cx + x - offX, 0); ctx.lineTo(cx + x - offX, H); ctx.stroke();
+  }
+  for (let z = -cy; z <= cy; z += gridSize*SCALE) {
+    ctx.beginPath(); ctx.moveTo(0, cy + z - offZ); ctx.lineTo(W, cy + z - offZ); ctx.stroke();
+  }
+
+  // Path history
+  if (mapHistory.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(124,92,255,0.25)';
+    ctx.lineWidth = 1.5;
+    mapHistory.forEach((pt, i) => {
+      const mx = cx + (pt.x - pos.x) * SCALE;
+      const my = cy + (pt.z - pos.z) * SCALE;
+      i === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my);
+    });
+    ctx.stroke();
+  }
+
+  // Entities
+  const entityCanvas = [];
+  for (const e of entities) {
+    // We don't have exact entity positions from state — show label at edge
+  }
+
+  // Bot (center)
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5, 0, Math.PI*2);
+  ctx.fillStyle = '#26c976';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(38,201,118,0.4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 10, 0, Math.PI*2);
+  ctx.stroke();
+
+  // Label
+  ctx.fillStyle = '#d8e0f4';
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${pos.x.toFixed(0)} ${pos.y.toFixed(0)} ${pos.z.toFixed(0)}`, cx + 14, cy + 4);
+}
+
+// ── Log Feed ────────────────────────────────────────
+function addLog(kind, msg) {
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const div = document.createElement('div');
+  div.className = `log-entry ${kind}`;
+  div.innerHTML = `<span class="ts">${ts}</span><span class="msg">${escHtml(msg)}</span>`;
+  logEl.appendChild(div);
+  logCount++;
+  if (logEl.children.length > MAX_LOG) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+  $('logCount').textContent = `${logCount} entries`;
+}
+
+// ── Bot Output Stream ───────────────────────────────
+socket.on('bot-output', (agentName_, msg) => {
+  if (agentName_ !== agentName) return;
+  const text = typeof msg === 'string' ? msg : msg?.message || JSON.stringify(msg);
+  // Classify
+  if (/\[Agent\]|\[TaskRunner\]|\[Motor\]/.test(text)) addLog('action', text);
+  else if (/\[Brain\]|\[NN\]|\[Executive\]/.test(text)) addLog('brain', text);
+  else if (/chat|whisper|say/i.test(text)) addLog('chat', text);
+  else if (/error|fail|warn|dead|died/i.test(text)) addLog('error', text);
+  else addLog('info', text);
+});
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Clock tick ──────────────────────────────────────
+setInterval(() => { $('clockTag').textContent = new Date().toLocaleTimeString(); }, 1000);
+</script>
+</body>
+</html>

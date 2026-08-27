@@ -1,0 +1,11 @@
+[Agent] Step 2 threw: No food in inventory
+[Agent] Step 3 threw: No obtainable log found after full expedition sweep
+[Agent] Step 4 threw: No obtainable log found after full expedition sweep
+[Agent] Step 5 threw: Missing resources to craft stick. Need: planks
+[Agent] Step 6 threw: Missing resources to craft crafting_table. Need: planks
+[Agent] Step 7 threw: Missing resources to craft wooden_pickaxe. Need: planks
+[Agent] Step 8 threw: Missing resources to craft wooden_sword. Need: planks
+[Agent] Step 11 threw: No obtainable cobblestone found after full expedition sweep
+[Agent] Step 12 threw: Failed to craft stone_pickaxe — have ingredients but cannot craft (need a crafting table nearby?).
+[Agent] Step 13 threw: Failed to craft stone_sword — have ingredients but cannot craft (need a crafting table nearby?).
+[Agent] Step 14 threw: Failed to craft furnace — have ingredients but cannot craft (need a crafting table nearby?).

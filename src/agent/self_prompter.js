@@ -73,6 +73,9 @@ export class SelfPrompter {
     }
 
     update(delta) {
+        // A raw `interrupt = true` poke with no loop running (e.g. from
+        // respondFunc between cycles) would block auto-restart forever.
+        if (this.interrupt && !this.loop_active) this.interrupt = false;
         if (this.state === ACTIVE && !this.loop_active && !this.interrupt) {
             if (this.agent.isIdle() && this.agent._messageQueue.length === 0)
                 this.idle_time += delta;
@@ -100,14 +103,23 @@ export class SelfPrompter {
     async stop(stop_action=true) {
         this.interrupt = true;
         if (stop_action) await this.agent.actions.stop();
-        await this.stopLoop();
+        // stopLoop early-returns when interrupt is already set, so wait out
+        // any running loop here and clear the flag ourselves — a sticky
+        // interrupt would block future starts via update().
+        while (this.loop_active) {
+            await new Promise(r => setTimeout(r, 500));
+        }
+        this.interrupt = false;
         this.state = STOPPED;
     }
 
     async pause() {
         this.interrupt = true;
         await this.agent.actions.stop();
-        await this.stopLoop();
+        while (this.loop_active) {
+            await new Promise(r => setTimeout(r, 500));
+        }
+        this.interrupt = false;
         this.state = PAUSED;
     }
 

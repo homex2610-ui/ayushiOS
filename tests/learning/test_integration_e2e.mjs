@@ -41,7 +41,9 @@ function cleanup() {
 console.log('\n=== 1. ExecutiveBrain — Cooldown prevents avoid_hazard repeat ===\n');
 
 {
-  const memory = { recordFailure: () => {} };
+  // Mock mirrors MemoryMatrix.getBeliefs — hazardsNearby feeds the
+  // avoid_hazard need scorer through ExecutiveBrain._buildBeliefs.
+  const memory = { recordFailure: () => {}, getBeliefs: () => ({ hazardsNearby: true, hazardCount: 2 }) };
   const personality = {
     traits: { curiosity: 0.5, sociability: 0.3, bravery: 0.7 },
     allowsRiskyTasks: () => true,
@@ -359,7 +361,9 @@ console.log('\n=== 6. ExecutiveBrain — No hazards, other needs dominate ===\n'
   const result = brain.decide(snapshot);
   assertNotEqual(result.task, 'avoid_hazard', 'Without hazards, avoid_hazard is not selected');
   assert(result.steps.length > 0, 'Decision produces steps');
-  assert(result.context !== undefined, 'Decision produces task context');
+  // P0-3 contract change: decide() returns {task, steps} only — plan
+  // context is created by MotorCortex when it dispatches the goal.
+  assert(Array.isArray(result.steps), 'Decision carries step list (context owned by motor)');
 }
 
 // ─────────────────────────────────────────────────────────────

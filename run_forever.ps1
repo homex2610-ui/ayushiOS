@@ -7,7 +7,7 @@ $waitTime = 10
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Mindcraft Bot - Forever Loop Launcher  " -ForegroundColor Cyan
-Write-Host "  Target: play.kryonmc.net | Bot: ayushi " -ForegroundColor Cyan
+Write-Host "  Target: proxy.driftsmp.net | Bot: ayushi_ds_2026 " -ForegroundColor Cyan
 Write-Host "  Task: Diamond Grind + Base + Farm      " -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 

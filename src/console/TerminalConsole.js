@@ -128,7 +128,8 @@ export class TerminalConsole {
     async _handleInput(line) {
         if (line.startsWith('/') || line.startsWith('!')) {
             const cmd = line.substring(1).toLowerCase().split(' ')[0];
-            const rest = line.substring(line.indexOf(' ') + 1);
+            const sp = line.indexOf(' ');
+            const rest = sp === -1 ? '' : line.substring(sp + 1).trim();
 
             switch (cmd) {
                 case 'help':

@@ -79,6 +79,10 @@ export class Perception {
         const armor = bot.entity.equipment || [];
         const armorSlots = armor.filter(i => i != null).length;
         const armorDurabilityPct = this._avgArmorDurability(armor);
+        // Free-slot count (main 9-35 + hotbar 36-44) for inventory-pressure decisions
+        const usedSlots = new Set(inv.map(i => i.slot ?? i.index));
+        let freeSlots = 0;
+        for (let s = 9; s <= 44; s++) if (!usedSlots.has(s)) freeSlots++;
 
         return {
             pos: { x: pos.x, y: pos.y, z: pos.z },
@@ -88,6 +92,7 @@ export class Perception {
             armorDurabilityPct,
             heldItem: bot.heldItem?.name ?? null,
             inventory: inv.map(i => ({ name: i.name, count: i.count, slot: i.slot })),
+            freeSlots,
             fallDistance: bot.entity.fallDistance ?? 0,
             inLava: this._isInLava(bot),
             drowning: bot.entity.isInWater && !this._headAboveWater(bot),

@@ -14,8 +14,8 @@ export default [
       "no-floating-promise": noFloatingPromise,
     },
     languageOptions: {
-      globals: { ...globals.browser, process: 'readonly', __dirname: 'readonly' },
-      ecmaVersion: 2021,
+      globals: { ...globals.node, process: 'readonly', __dirname: 'readonly' },
+      ecmaVersion: 2022,
       sourceType: "module",
     },
     rules: {

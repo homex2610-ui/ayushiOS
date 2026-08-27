@@ -56,12 +56,13 @@ export async function serverInfo(ip, port, timeout = 1000, verbose = false) {
  * @param {string} ip - The IP address to scan.
  * @param {boolean} earlyExit - Whether to exit early after finding a server.
  * @param {number} timeout - The connection timeout in ms.
+ * @param {Object|null} portRange - Optional port range as {start, end}; null falls back to the default 49000-65000.
  * @returns {Promise<Array>} - A Promise that resolves to an array of server info objects.
  */
-export async function findServers(ip, earlyExit = false, timeout = 100) {
+export async function findServers(ip, earlyExit = false, timeout = 100, portRange = null) {
     const servers = [];
-    const startPort = 49000;
-    const endPort = 65000;
+    const startPort = portRange?.start ?? 49000;
+    const endPort = portRange?.end ?? 65000;
     let aborted = false;
 
     const checkPort = (port) => {
@@ -130,9 +131,24 @@ export async function getServer(host, port, version) {
     if (port == -1)
     {
         console.log(`No port provided. Searching for LAN server on host ${host}...`);
-        
+
+        // Optional env override: MINDCRAFT_LAN_PORT_RANGE="start:end" (e.g. "49152:49200").
+        // When unset, the default 49000-65000 range is used (unchanged behavior).
+        let lanPortRange = null;
+        if (process.env.MINDCRAFT_LAN_PORT_RANGE) {
+            const parts = String(process.env.MINDCRAFT_LAN_PORT_RANGE).split(':');
+            const startPortEnv = parseInt(parts[0], 10);
+            const endPortEnv = parseInt(parts[1], 10);
+            if (!isNaN(startPortEnv) && !isNaN(endPortEnv) && endPortEnv >= startPortEnv) {
+                lanPortRange = { start: startPortEnv, end: endPortEnv };
+                console.log(`Using MINDCRAFT_LAN_PORT_RANGE ${startPortEnv}:${endPortEnv}`);
+            } else {
+                console.warn(`Invalid MINDCRAFT_LAN_PORT_RANGE "${process.env.MINDCRAFT_LAN_PORT_RANGE}" (expected "start:end"). Using default range.`);
+            }
+        }
+
         for (let attempt = 1; attempt <= 3; attempt++) {
-            await findServers(host, true).then((servers) => {
+            await findServers(host, true, 100, lanPortRange).then((servers) => {
                 if (servers.length > 0)
                     server = servers[0];
             });

@@ -9,6 +9,7 @@ export class DangerAnalyzer {
     constructor(knowledgeBase, logger) {
         this.kb = knowledgeBase;
         this.log = logger || ((...a) => {});
+        this._pendingDangers = [];
     }
 
     observe(bot) {
@@ -17,6 +18,7 @@ export class DangerAnalyzer {
         if (!pos) return;
         this._checkEnvironment(bot, pos);
         this._checkEntities(bot, pos);
+        this._flushDangers();
     }
 
     _checkEnvironment(bot, pos) {
@@ -68,24 +70,30 @@ export class DangerAnalyzer {
     }
 
     _reportDanger(type, position, severity) {
-        const key = `${type}_${Math.round(position.x)}_${Math.round(position.y)}_${Math.round(position.z)}`;
-        const dangers = this.kb.data.dangers || [];
-        const existing = dangers.find(d => d.key === key);
-        if (existing) {
-            existing.lastSeen = Date.now();
-            existing.count = (existing.count || 1) + 1;
-        } else {
+        // Buffered: collected during the observation pass, persisted in one batch.
+        this._pendingDangers.push({ type, position, severity, ts: Date.now() });
+    }
+
+    _flushDangers() {
+        if (this._pendingDangers.length === 0) return;
+        if (!Array.isArray(this.kb.data.dangers)) this.kb.data.dangers = [];
+        const dangers = this.kb.data.dangers;
+        for (const rep of this._pendingDangers) {
+            const key = `${rep.type}_${Math.round(rep.position.x)}_${Math.round(rep.position.y)}_${Math.round(rep.position.z)}`;
+            // Stable position key defeats per-tick duplicate entries.
+            if (dangers.find(d => d.key === key)) continue;
             dangers.push({
                 key,
-                type,
-                severity,
-                position: { x: Math.round(position.x), y: Math.round(position.y), z: Math.round(position.z) },
-                firstSeen: Date.now(),
-                lastSeen: Date.now(),
+                type: rep.type,
+                severity: rep.severity,
+                position: { x: Math.round(rep.position.x), y: Math.round(rep.position.y), z: Math.round(rep.position.z) },
+                firstSeen: rep.ts,
+                lastSeen: rep.ts,
                 count: 1,
             });
         }
-        this.kb.save();
+        this._pendingDangers = [];
+        this.kb.save(); // single save after the whole pass
     }
 
     markUnsafeArea(startPos, endPos, reason) {

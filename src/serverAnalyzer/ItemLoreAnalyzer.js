@@ -71,7 +71,7 @@ export class ItemLoreAnalyzer {
         const priceMatch = allText.match(/(?:price|cost|worth|value)[:\s]*\$?(\d+[.,]?\d*)/i);
         if (priceMatch) {
             this.kb.set('economy.enabled', true);
-            const price = parseFloat(priceMatch[1].replace(',', ''));
+            const price = parseFloat(priceMatch[1].replace(/,/g, ''));
             if (!isNaN(price)) {
                 this.kb.push('observedPrices', { price, ts: Date.now() });
             }

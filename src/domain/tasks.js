@@ -100,6 +100,75 @@ export const TASKS = {
     },
   },
 
+  advance_capability: {
+    id: 'advance_capability',
+    description: 'Climb the tool tier ladder toward iron gear (wood → stone → iron → armor)',
+    priority: 0.55,
+    preconditions: [],
+    effects: ['hasBetterTools'],
+    expand: (state) => {
+      // Species-agnostic throughout: 'log' collects ANY wood, CraftPlanks
+      // converts whatever we hold. Mirrors capabilities.js semantics.
+      const sv = state; // already a _buildStateView product
+      const inv = Array.isArray(sv.inventory) ? sv.inventory : [];
+      const has = (n) => inv.some(i => i?.name === n);
+      const hasAny = (pred) => inv.some(i => i?.name && pred(i.name));
+      const pickaxeOf = (tier) => inv.some(i => i?.name === `${tier}_pickaxe`);
+      const planning = sv.planning || {};
+      const steps = [];
+
+      // Tier 0 — bootstrap wood tools
+      if (!hasAny(n => n.endsWith('_pickaxe'))) {
+        steps.push({ operator: 'Collect', params: { item: 'log', count: 4 } });
+        steps.push({ operator: 'CraftPlanks', params: { count: 8 } });
+        steps.push({ operator: 'Craft', params: { item: 'stick', count: 4 } });
+        steps.push({ operator: 'Craft', params: { item: 'crafting_table', count: 1 } });
+        steps.push({ operator: 'Craft', params: { item: 'wooden_pickaxe', count: 1 } });
+        steps.push({ operator: 'Equip', params: { item: 'wooden_pickaxe', slot: 'hand' } });
+        return { steps };
+      }
+
+      // Tier 1 — stone kit + furnace
+      if (!pickaxeOf('stone')) {
+        steps.push({ operator: 'Collect', params: { item: 'cobblestone', count: 16 } });
+        steps.push({ operator: 'Craft', params: { item: 'stone_pickaxe', count: 1 } });
+        if (!planning.hasFurnace) {
+          steps.push({ operator: 'Craft', params: { item: 'furnace', count: 1 } });
+        }
+        steps.push({ operator: 'Equip', params: { item: 'stone_pickaxe', slot: 'hand' } });
+        return { steps };
+      }
+
+      // Tier 2 — iron pipeline
+      const ironReady = planning.ironIngotCount > 0 || has('iron_ingot');
+      if (!ironReady) {
+        if ((planning.coalCount ?? 0) < 6 && !has('coal')) {
+          steps.push({ operator: 'Collect', params: { item: 'coal', count: 8 } });
+        }
+        steps.push({ operator: 'Collect', params: { item: 'iron_ore', count: 12 } });
+        steps.push({ operator: 'Smelt', params: { input: 'raw_iron', fuel: 'coal', count: 12 } });
+        return { steps };
+      }
+
+      // Tier 3 — iron pickaxe then armor pieces
+      if (!pickaxeOf('iron')) {
+        steps.push({ operator: 'Craft', params: { item: 'iron_pickaxe', count: 1 } });
+        steps.push({ operator: 'Equip', params: { item: 'iron_pickaxe', slot: 'hand' } });
+        return { steps };
+      }
+      for (const [piece, slot] of [['iron_sword', 'hand'], ['iron_helmet', 'head'], ['iron_chestplate', 'torso'], ['iron_leggings', 'legs'], ['iron_boots', 'feet']]) {
+        if (!has(piece)) {
+          steps.push({ operator: 'Craft', params: { item: piece, count: 1 } });
+          steps.push({ operator: 'Equip', params: { item: piece, slot } });
+          return { steps };
+        }
+      }
+
+      // Fully geared — nothing to advance
+      return { steps: [] };
+    },
+  },
+
   // ─── Base building ─────────────────────────────────────────
 
   build_base: {
@@ -123,11 +192,12 @@ export const TASKS = {
       }
 
       const steps = [];
-      // Collect enough logs for everything once, craft planks once
+      // Collect enough logs for everything once, craft planks once.
+      // Generic 'log' = ANY wood species; CraftPlanks converts whatever we hold.
       // table needs 4 planks (1 log), chest needs 8 planks (2 logs)
       if (!hasTable || !hasChest) {
-        steps.push({ operator: 'Collect', params: { item: 'oak_log', count: 12 } });
-        steps.push({ operator: 'Craft', params: { item: 'oak_planks', count: 16 } });
+        steps.push({ operator: 'Collect', params: { item: 'log', count: 12 } });
+        steps.push({ operator: 'CraftPlanks', params: { count: 16 } });
       }
       if (!hasTable) {
         steps.push({ operator: 'Craft', params: { item: 'crafting_table', count: 1 } });
@@ -137,7 +207,7 @@ export const TASKS = {
       }
       if (steps.length === 0) {
         // Already has table and chest — just reinforce
-        steps.push({ operator: 'Collect', params: { item: 'oak_log', count: 8 } });
+        steps.push({ operator: 'Collect', params: { item: 'log', count: 8 } });
       }
       steps.push({ operator: 'Wait', params: { ms: 1000 } });
       return { steps };
@@ -216,10 +286,11 @@ function _expandIronGear(state) {
   const hasIronPick = inv.some(i => i.name?.includes('iron') && i.name?.includes('pickaxe'));
   const hasPickaxe = inv.some(i => i.name?.includes('pickaxe'));
 
-  // Tool progression: if we lack a pickaxe, craft a wooden one first
+  // Tool progression: if we lack a pickaxe, craft a wooden one first.
+  // Generic wood: 'log' collects any species; CraftPlanks converts what we hold.
   if (!hasPickaxe) {
-    steps.push({ operator: 'Collect', params: { item: 'oak_log', count: 4 } });
-    steps.push({ operator: 'Craft', params: { item: 'oak_planks', count: 8 } });
+    steps.push({ operator: 'Collect', params: { item: 'log', count: 4 } });
+    steps.push({ operator: 'CraftPlanks', params: { count: 8 } });
     steps.push({ operator: 'Craft', params: { item: 'stick', count: 4 } });
     steps.push({ operator: 'Craft', params: { item: 'wooden_pickaxe', count: 1 } });
     steps.push({ operator: 'Equip', params: { item: 'wooden_pickaxe', slot: 'hand' } });

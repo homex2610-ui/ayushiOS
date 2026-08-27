@@ -3,6 +3,18 @@ import { serverProxy } from '../agent/mindserver_proxy.js';
 import settings from '../agent/settings.js';
 import yargs from 'yargs';
 
+// Child agents don't run under main.js, so they need their own global safety
+// nets. Without these, any fire-and-forget async rejection kills the process.
+process.on('unhandledRejection', (reason) => {
+    console.error('[FATAL] Unhandled Rejection:', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (err, origin) => {
+    // Exit non-zero so AgentProcess treats it as a crash and restarts us.
+    console.error('[FATAL] Uncaught Exception:', err?.stack || err);
+    console.error('[FATAL] Origin:', origin);
+    process.exit(1);
+});
+
 const args = process.argv.slice(2);
 if (args.length < 1) {
     console.log('Usage: node init_agent.js -n <agent_name> -p <port> -l <load_memory> -m <init_message> -c <count_id>');
@@ -83,4 +95,9 @@ try {
         console.error(error.stack);
         process.exit(1);
     }
-})();
+})().catch(e => {
+    // Belt-and-suspenders: the inner catch covers startup failures; this
+    // catches anything thrown by the handler chain itself.
+    console.error('Fatal error in agent bootstrap:', e?.stack || e);
+    process.exit(1);
+});

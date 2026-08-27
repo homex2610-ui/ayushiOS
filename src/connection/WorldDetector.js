@@ -62,10 +62,10 @@ export class WorldDetector {
 
     async _checkScoreboard(profile) {
         try {
-            const scoreboard = this.bot.scoreboard;
-            if (!scoreboard) return;
+            const sidebar = this.bot.scoreboard?.sidebar;
+            if (!sidebar) return;
 
-            const title = (scoreboard.title || '').toLowerCase().trim();
+            const title = (sidebar?.title || '').toString().toLowerCase().trim();
             profile.scoreboardTitle = title;
 
             if (title) {
@@ -87,11 +87,9 @@ export class WorldDetector {
             }
 
             profile.scoreboardLines = [];
-            if (scoreboard.items) {
-                for (const item of Object.values(scoreboard.items)) {
-                    const name = (item.displayName?.text || item.name || '').toLowerCase();
-                    if (name) profile.scoreboardLines.push(name);
-                }
+            for (const item of (sidebar?.items || [])) {
+                const name = (item.displayName?.text || item.name || '').toLowerCase();
+                if (name) profile.scoreboardLines.push(name);
             }
 
             const hubKeywords = ['hub', 'lobby', 'practice', 'selector', 'minigame', 'kitpvp', 'bedwars', 'skywars', 'parkour', 'duels'];
@@ -186,11 +184,11 @@ export class WorldDetector {
 
     async _checkTabList(profile) {
         try {
-            const tabList = this.bot.tabList;
-            if (!tabList) return;
+            const tablist = this.bot.tablist;
+            if (!tablist) return;
 
-            if (tabList.header) {
-                profile.tabHeader = (tabList.header.text || '').toLowerCase();
+            if (tablist.header) {
+                profile.tabHeader = (tablist.header.text || '').toLowerCase();
                 if (profile.tabHeader.includes('hub') || profile.tabHeader.includes('lobby')) {
                     profile.isHub = true;
                     profile.confidence += 15;
@@ -199,8 +197,8 @@ export class WorldDetector {
                     profile.confidence += 20;
                 }
             }
-            if (tabList.footer) {
-                profile.tabFooter = (tabList.footer.text || '').toLowerCase();
+            if (tablist.footer) {
+                profile.tabFooter = (tablist.footer.text || '').toLowerCase();
                 if (profile.tabFooter.includes('hub') || profile.tabFooter.includes('lobby')) {
                     profile.isHub = true;
                     profile.confidence += 10;
@@ -289,8 +287,9 @@ export class WorldDetector {
         try {
             const modeNpcKeywords = ['survival', 'smp', 'lifesteal', 'practice', 'kitpvp', 'bedwars', 'skywars', 'minigame', 'parkour', 'factions', 'advertise'];
             const hasModeNPCs = Object.values(this.bot.entities || {}).some(e => {
+                // Real players are never hub NPCs — only non-player entities may match keywords
+                if (e.type === 'player') return false;
                 const name = (e.displayName || e.name || e.username || '').toLowerCase().replace(/§./g, '');
-                if (e.type === 'player' && (name === this.bot.username?.toLowerCase() || name.startsWith('player'))) return false;
                 const customName = e.metadata?.[2]?.toString?.().replace(/§./g, '').toLowerCase().trim();
                 const matchText = customName || name;
                 return matchText.length > 0 && modeNpcKeywords.some(k => matchText.includes(k));

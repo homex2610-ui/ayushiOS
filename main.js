@@ -50,8 +50,18 @@ const args = parseArguments();
 if (args.profiles) {
     settings.profiles = args.profiles;
 }
+// Local/LAN world marker: skip hub-join heuristics that chat server commands
+if (args.host && (args.host === '127.0.0.1' || args.host === 'localhost' || args.host.startsWith('192.168.') || args.host.startsWith('10.'))) {
+    settings._isLocalWorld = true;
+}
 if (args.task_path) {
-    let tasks = JSON.parse(readFileSync(args.task_path, 'utf8'));
+    let tasks;
+    try {
+        tasks = JSON.parse(readFileSync(args.task_path, 'utf8'));
+    } catch (err) {
+        console.error(`[Main] Failed to parse task file: ${err.message}`);
+        process.exit(1);
+    }
     if (args.task_id) {
         if (tasks[args.task_id]) {
             settings.task = tasks[args.task_id];
@@ -71,17 +81,21 @@ if (args.task_path) {
     }
 }
 
-// Auto-load diamond_grind task if no task specified and auto_task is not explicitly nullified
-if (settings.auto_task !== false && !settings.task && existsSync('./tasks/diamond_grind.json')) {
-    try {
-        const tasks = JSON.parse(readFileSync('./tasks/diamond_grind.json', 'utf8'));
-        if (Array.isArray(tasks)) {
-            settings._taskSteps = tasks;
-            settings.task = null; // Don't use Task class - we'll use TaskRunner directly
-            console.log(`[Main] Auto-loaded diamond_grind task (${tasks.length} steps)`);
+// Auto-load the standing goal task for every run (default: iron armor grind)
+if (settings.auto_task !== false && !settings.task) {
+    const goalFile = settings.auto_task_file || './tasks/iron_armor.json';
+    const goalPath = existsSync(goalFile) ? goalFile : './tasks/diamond_grind.json';
+    if (existsSync(goalPath)) {
+        try {
+            const tasks = JSON.parse(readFileSync(goalPath, 'utf8'));
+            if (Array.isArray(tasks)) {
+                settings._taskSteps = tasks;
+                settings.task = null; // Don't use Task class - we'll use TaskRunner directly
+                console.log(`[Main] Auto-loaded ${goalPath} task (${tasks.length} steps)`);
+            }
+        } catch (err) {
+            console.warn('[Main] Failed to auto-load task:', err.message);
         }
-    } catch (err) {
-        console.warn('[Main] Failed to auto-load task:', err.message);
     }
 }
 
@@ -141,10 +155,18 @@ process.on('SIGTERM', cleanup);
 
 Mindcraft.init(false, settings.mindserver_port, settings.auto_open_ui);
 
+// Stagger agent spawns on low-spec PCs: simultaneous joins starve the
+// integrated server's event loop -> keep-alive misses -> "disconnect.timeout".
+let _spawnDelay = 0;
 for (let profile of settings.profiles) {
     const profile_json = safeReadJSON(() => readFileSync(profile, 'utf8'), {});
-    settings.profile = profile_json;
-    Mindcraft.createAgent(settings);
+    const s = { ...settings, profile: profile_json };
+    if (_spawnDelay === 0) {
+        Mindcraft.createAgent(s);
+    } else {
+        setTimeout(() => Mindcraft.createAgent(s), _spawnDelay);
+    }
+    _spawnDelay += 45000; // 45s between each additional bot join
 }
 
 // Start terminal console

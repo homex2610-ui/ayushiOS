@@ -106,7 +106,7 @@ export class EnvironmentReporter {
     const profile = wd?.worldProfile;
 
     return {
-      server: bot.scoreboard?.title || 'unknown',
+      server: bot.scoreboard?.sidebar?.title || 'unknown',
       worldType: profile?.type || 'unknown',
       isHub: profile?.type === 'hub' || profile?.isHub || false,
       dimension: bot.world?.dimension || 'unknown',
@@ -173,17 +173,15 @@ export class EnvironmentReporter {
   }
 
   _getScoreboard() {
-    const sb = this.bot.scoreboard;
+    const sb = this.bot.scoreboard?.sidebar;
     if (!sb) return { title: null, lines: [] };
     const lines = [];
-    if (sb.items) {
-      for (const item of Object.values(sb.items)) {
-        const text = (item.displayName?.text || item.name || '');
-        if (text) lines.push(text.replace(/§./g, ''));
-      }
+    for (const item of (sb.items || [])) {
+      const text = (item.displayName?.text || item.name || '');
+      if (text) lines.push(String(text).replace(/§./g, ''));
     }
     return {
-      title: sb.title?.replace(/§./g, '') || null,
+      title: String(sb.title ?? '').replace(/§./g, '') || null,
       lines: lines.slice(0, 10),
     };
   }

@@ -222,6 +222,7 @@ export class BehaviorTree {
             case 'buildShelter': return this._buildShelter(state);
             case 'gatherWood': return this._buildGatherWood();
             case 'emergencyHeal': return this._buildEmergencyHeal();
+            case 'stashLoot': return this._buildStashLoot();
             default:
                 if (settings.bt_log) console.warn(`[BT] No builder for action: ${candidate.action}`);
                 return new Action(() => false);
@@ -241,26 +242,40 @@ export class BehaviorTree {
         const fightAction = new AsyncAction(async (ctx) => {
             ctx.bot.modes.pause('combat');
             ctx.bot.modes.pause('cowardice');
+            ctx.bot.modes.pause('self_defense'); // prevent mode-defense from fighting BT over the pathfinder goal
+            ctx.bot.modes.pause('pvp');
             await skills.equipHighestAttack(ctx.bot);
             const entity = ctx.bot.nearestEntity(e => e.id === targetId || (e.name === target.name && ctx.bot.entity.position.distanceTo(e.position) < 20));
             if (!entity) { ctx.bot.modes.unPauseAll(); return false; }
 
             const pf = await import('mineflayer-pathfinder');
+            // CJS interop: the module may land at .default or spread across the namespace
+            const pfm = pf.default ?? pf;
+            const PFGoals = pfm.goals ?? pf.goals;
+            ctx.bot.pathfinder.setMovements(skills.safeMovements(ctx.bot, { destructive: true }));
+            let lastPathAt = 0;
             while (!ctx.bot.interrupt_code && ctx.bot.entity.position.distanceTo(entity.position) < 20 && entity.isValid) {
-                if (ctx.bot.entity.position.distanceTo(entity.position) >= 3) {
-                    try {
-                        ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                        await gotoWithTimeout(ctx.bot, new pf.goals.GoalFollow(entity, 2), 10000);
-                    } catch (err) { console.warn(`[BT] fight chase failed: ${err.message}`); }
-                }
-                if (ctx.bot.entity.position.distanceTo(entity.position) <= 2) {
-                    try {
-                        ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                        await gotoWithTimeout(ctx.bot, new pf.goals.GoalInvert(new pf.goals.GoalFollow(entity, 2)), 8000);
-                    } catch (err) { console.warn(`[BT] fight backup failed: ${err.message}`); }
-                }
+            if (ctx.bot.entity.position.distanceTo(entity.position) >= 3) {
+            // Re-path at most every 1.5s — constantly resetting GoalFollow is what
+            // caused "The goal was changed before it could be completed" spam.
+            if (Date.now() - lastPathAt > 1500) {
+                lastPathAt = Date.now();
+                try { await gotoWithTimeout(ctx.bot, new PFGoals.GoalFollow(entity, 2), 8000); }
+                catch (err) { console.warn(`[BT] fight chase failed: ${err.message}`); }
+            } else {
+                await new Promise(r => setTimeout(r, 150));
+            }
+            }
+            if (ctx.bot.entity.position.distanceTo(entity.position) <= 2.5 && entity.name !== 'creeper') {
                 ctx.bot.pvp.attack(entity);
                 await new Promise(r => setTimeout(r, 300));
+            } else if (entity.name === 'creeper' && ctx.bot.entity.position.distanceTo(entity.position) <= 3) {
+                // Creeper about to blow — back off instead of trading damage.
+                try { await gotoWithTimeout(ctx.bot, new PFGoals.GoalInvert(new PFGoals.GoalFollow(entity, 4)), 3000); }
+                catch (err) { /* best effort */ }
+                continue;
+            }
+                await new Promise(r => setTimeout(r, 200));
             }
             ctx.bot.pvp.stop();
             ctx.bot.modes.unPauseAll();
@@ -282,8 +297,9 @@ export class BehaviorTree {
             const retreatDir = { x: pos.x + (pos.x > 0 ? 10 : -10), y: pos.y, z: pos.z + (pos.z > 0 ? 10 : -10) };
             try {
                 const pf = await import('mineflayer-pathfinder');
-                ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(retreatDir.x, retreatDir.y, retreatDir.z), 8000);
+            const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
+                ctx.bot.pathfinder.setMovements(new pfx.Movements(ctx.bot));
+                await gotoWithTimeout(ctx.bot, new PFG.GoalBlock(retreatDir.x, retreatDir.y, retreatDir.z), 8000);
             } catch (err) { console.warn(`[BT] retreat failed: ${err.message}`); }
             ctx.bot.modes.unPauseAll();
             return true;
@@ -365,8 +381,9 @@ export class BehaviorTree {
             const escapeY = Math.min(pos.y + 3, ctx.bot.game?.dimension?.height ?? 320);
             try {
                 const pf = await import('mineflayer-pathfinder');
-                ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(pos.x, escapeY, pos.z), 8000);
+            const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
+                ctx.bot.pathfinder.setMovements(new pfx.Movements(ctx.bot));
+                await gotoWithTimeout(ctx.bot, new PFG.GoalBlock(pos.x, escapeY, pos.z), 8000);
             } catch (err) { console.warn(`[BT] lava escape failed: ${err.message}`); }
             return true;
         });
@@ -403,8 +420,9 @@ export class BehaviorTree {
             };
             try {
                 const pf = await import('mineflayer-pathfinder');
-                ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(away.x, away.y, away.z), 10000);
+            const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
+                ctx.bot.pathfinder.setMovements(new pfx.Movements(ctx.bot));
+                await gotoWithTimeout(ctx.bot, new PFG.GoalBlock(away.x, away.y, away.z), 10000);
             } catch (err) { console.warn(`[BT] hazard avoid failed: ${err.message}`); }
             return true;
         });
@@ -419,8 +437,9 @@ export class BehaviorTree {
             new AsyncAction(async (ctx) => {
                 try {
                     const pf = await import('mineflayer-pathfinder');
-                    ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                    await gotoWithTimeout(ctx.bot, new pf.goals.GoalNear(ally.pos.x, ally.pos.y, ally.pos.z, 3), 15000);
+            const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
+                    ctx.bot.pathfinder.setMovements(new pfx.Movements(ctx.bot));
+                    await gotoWithTimeout(ctx.bot, new PFG.GoalNear(ally.pos.x, ally.pos.y, ally.pos.z, 3), 15000);
                 } catch (err) { console.warn(`[BT] assist goto failed: ${err.message}`); }
                 return true;
             }),
@@ -447,8 +466,9 @@ export class BehaviorTree {
             new AsyncAction(async (ctx) => {
                 try {
                     const pf = await import('mineflayer-pathfinder');
-                    ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
-                    await gotoWithTimeout(ctx.bot, new pf.goals.GoalNear(target.x, target.y, target.z, 5), 15000);
+            const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
+                    ctx.bot.pathfinder.setMovements(new pfx.Movements(ctx.bot));
+                    await gotoWithTimeout(ctx.bot, new PFG.GoalNear(target.x, target.y, target.z, 5), 15000);
                 } catch (err) { console.warn(`[BT] explore goto failed: ${err.message}`); }
                 return true;
             }),
@@ -464,6 +484,36 @@ export class BehaviorTree {
         });
     }
 
+    _buildStashLoot() {
+        // Deposit loot at the nearest chest while keeping survival essentials.
+        // Uses the InventoryManager when available (it knows keep-rules +
+        // remembered chest positions); falls back to raw skills otherwise.
+        return new AsyncAction(async (ctx) => {
+            try {
+                const im = ctx.agent?.inventoryManager;
+                if (im) {
+                    const summary = await im.depositLoot();
+                    await im.compact({ sort: true });
+                    return summary !== 'no chest available';
+                }
+                // Fallback: deposit everything except a few keeps
+                const chest = ctx.bot.findBlock({ matching: b => b.name === 'chest' || b.name === 'barrel', maxDistance: 48 });
+                if (!chest) return false;
+                const pf = await import('mineflayer-pathfinder');
+                const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
+                ctx.bot.pathfinder.setMovements(skills.safeMovements(ctx.bot));
+                await gotoWithTimeout(ctx.bot, new PFG.GoalNear(chest.position.x, chest.position.y, chest.position.z, 2), 20000);
+                const container = await ctx.bot.openContainer(chest);
+                for (const item of [...ctx.bot.inventory.items()]) {
+                    if (/pickaxe|sword|axe|shovel|torch|food|cooked|raw_|bucket/.test(item.name)) continue;
+                    try { await container.deposit(item.type, null, item.count); } catch (_) {}
+                }
+                await container.close();
+                return true;
+            } catch { return false; }
+        });
+    }
+
     _buildMineDiamonds(state) {
         return new Sequence([
             new Action(ctx => { ctx.bot.pathfinder.stop(); return true; }),
@@ -471,9 +521,10 @@ export class BehaviorTree {
                 try {
                     await skills.equipHighestAttack(ctx.bot);
                     const pf = await import('mineflayer-pathfinder');
-                    ctx.bot.pathfinder.setMovements(new pf.Movements(ctx.bot));
+            const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
+                    ctx.bot.pathfinder.setMovements(new pfx.Movements(ctx.bot));
                     const targetY = Math.max(0, ctx.bot.entity.position.y - 15);
-                    await gotoWithTimeout(ctx.bot, new pf.goals.GoalBlock(ctx.bot.entity.position.x, targetY, ctx.bot.entity.position.z), 20000);
+                    await gotoWithTimeout(ctx.bot, new PFG.GoalBlock(ctx.bot.entity.position.x, targetY, ctx.bot.entity.position.z), 20000);
                     await skills.collectBlock(ctx.bot, 'diamond_ore', 8);
                     return !ctx.bot.interrupt_code;
                 } catch { return false; }
@@ -484,8 +535,10 @@ export class BehaviorTree {
     _buildCraftDiamondPick() {
         return new AsyncAction(async (ctx) => {
             try {
-                await skills.craftItem(ctx.bot, 'diamond_pickaxe', 1);
-                await ctx.bot.equip(ctx.bot.inventory.findInventoryItem('diamond_pickaxe'), 'hand');
+                const ok = await skills.craftRecipe(ctx.bot, 'diamond_pickaxe', 1);
+                if (!ok) return false;
+                const pick = ctx.bot.inventory.findInventoryItem('diamond_pickaxe');
+                if (pick) await ctx.bot.equip(pick, 'hand');
                 return true;
             } catch { return false; }
         });
@@ -517,9 +570,10 @@ export class BehaviorTree {
                 try {
                     const pos = ctx.bot.entity.position;
                     const pf = await import('mineflayer-pathfinder');
+            const pfx = pf.default ?? pf; const PFG = pfx.goals ?? pf.goals;
                     const chest = ctx.bot.findBlock({ matching: b => b.name === 'chest', maxDistance: 10 });
                     if (chest) {
-                        await gotoWithTimeout(ctx.bot, new pf.goals.GoalNear(chest.position.x, chest.position.y, chest.position.z, 2), 15000);
+                        await gotoWithTimeout(ctx.bot, new PFG.GoalNear(chest.position.x, chest.position.y, chest.position.z, 2), 15000);
                         return true;
                     }
                     const below = ctx.bot.blockAt({ x: Math.floor(pos.x), y: Math.floor(pos.y) - 1, z: Math.floor(pos.z) });

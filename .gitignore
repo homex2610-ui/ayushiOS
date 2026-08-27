@@ -30,3 +30,8 @@ bot_error.log
 server_data*
 **/.DS_Store
 src/mindcraft-py/__pycache__/
+
+# Review cleanup: local logs and large review artifacts
+test_log.txt
+exec_diff.txt
+*.log

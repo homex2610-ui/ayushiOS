@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ayushi — Live</title>
+<script src="/socket.io/socket.io.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0c0e12;--surface:#161a22;--card:#1c222e;--border:#2a3344;--muted:#7a869e;--text:#e8eef8;--accent:#7c5cff;--green:#2ecb7a;--amber:#f5a623;--red:#ff4d6a;--blue:#3b82f6;--cyan:#22d3ee;--purple:#a78bfa}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.mono{font-family:JetBrains Mono,monospace}
+a{color:var(--accent)}
+header{position:sticky;top:0;z-index:20;background:rgba(12,14,18,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:14px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--muted);animation:pulse 2s infinite}
+.dot.online{background:var(--green);box-shadow:0 0 12px rgba(46,203,122,.6)}
+.dot.offline{background:var(--red)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(46,203,122,.4)}70%{box-shadow:0 0 0 10px rgba(46,203,122,0)}100%{box-shadow:0 0 0 0}}
+header h1{margin:0;font-size:18px;letter-spacing:.02em}
+header .sub{color:var(--muted);font-size:13px}
+header .spacer{flex:1}
+.badge{font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:5px 9px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted)}
+.badge.live{color:var(--green);border-color:rgba(46,203,122,.35);background:rgba(46,203,122,.08)}
+.wrap{max-width:1400px;margin:0 auto;padding:18px 16px 40px}
+.grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.card-h{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.card-h h2{margin:0;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.card-b{padding:14px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media(max-width:700px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px}
+.kpi .label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kpi .value{font-size:16px;font-weight:700;margin-top:4px}
+.bar{height:6px;background:#0f1320;border-radius:999px;overflow:hidden;margin-top:8px;border:1px solid var(--border)}
+.bar i{display:block;height:100%;border-radius:999px;transition:width .4s}
+.bar.health i{background:var(--green)}
+.bar.hunger i{background:var(--amber)}
+.status-pill{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--border);display:inline-flex;gap:6px;align-items:center}
+.status-pill.acting{color:var(--green);border-color:rgba(46,203,122,.3);background:rgba(46,203,122,.08)}
+.status-pill.thinking{color:var(--muted)}
+.status-pill.chatting{color:var(--blue);border-color:rgba(59,130,246,.3);background:rgba(59,130,246,.08)}
+.status-pill.stopped{color:var(--red);border-color:rgba(255,77,106,.3);background:rgba(255,77,106,.08)}
+.viewer-wrap{aspect-ratio:16/9;background:#0a0d14;border:1px solid var(--border);border-radius:12px;overflow:hidden;position:relative}
+.viewer-wrap iframe{width:100%;height:100%;border:0;display:block}
+.viewer-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px;text-align:center;padding:16px}
+.inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px}
+.inv-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;display:grid;place-items:center;gap:6px;position:relative}
+.inv-item img{width:32px;height:32px;image-rendering:pixelated}
+.inv-count{position:absolute;right:6px;bottom:22px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:2px 6px;border-radius:999px}
+.inv-name{font-size:11px;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.log{max-height:280px;overflow:auto;background:#0a0d14;border:1px solid var(--border);border-radius:10px;padding:10px;font-size:13px;line-height:1.5}
+.log .entry{padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.06)}
+.log .entry:last-child{border:0}
+.gauge{display:flex;align-items:center;gap:10px;margin:6px 0}
+.gauge .track{flex:1;height:8px;background:#0f1320;border:1px solid var(--border);border-radius:999px;overflow:hidden}
+.gauge .fill{height:100%;transition:width .4s;border-radius:999px}
+.controls{display:flex;flex-wrap:wrap;gap:8px}
+.btn{appearance:none;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:8px 12px;border-radius:10px;font-weight:600;cursor:pointer;font-size:13px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:white}
+.btn.danger{background:rgba(255,77,106,.12);border-color:rgba(255,77,106,.3);color:#ff9fb0}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.input{flex:1;min-width:160px;background:#0f1320;border:1px solid var(--border);color:var(--text);border-radius:10px;padding:9px 10px;font-size:13px}
+.small{font-size:12px;color:var(--muted)}
+/* feature bars */
+.feat-row{display:flex;align-items:center;gap:6px;margin:3px 0}
+.feat-label{font-size:10px;color:var(--muted);width:68px;text-align:right;font-family:JetBrains Mono,monospace}
+.feat-track{flex:1;height:6px;background:#0f1320;border-radius:999px;overflow:hidden}
+.feat-fill{height:100%;border-radius:999px;transition:width .3s}
+.feat-val{font-size:10px;color:var(--muted);width:30px;font-family:JetBrains Mono,monospace}
+/* decision chip */
+.chip{display:inline-block;font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted);margin:2px}
+.chip.winner{color:var(--green);border-color:rgba(46,203,122,.4);background:rgba(46,203,122,.1)}
+.chip.loser{opacity:.5}
+/* split panels */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="dot" id="dot"></div>
+  <h1>Ayushi — Live</h1>
+  <span class="sub mono" id="addr">localhost:8080</span>
+  <span class="spacer"></span>
+  <span class="badge live" id="liveBadge">● live</span>
+  <span class="badge mono" id="posBadge">—</span>
+</header>
+<div class="wrap">
+  <div class="grid">
+    <div style="display:grid;gap:14px">
+      <!-- Agent vitals -->
+      <div class="card">
+        <div class="card-h"><h2>Agent</h2><span class="small mono" id="agentName">—</span></div>
+        <div class="card-b">
+          <div class="kpis">
+            <div class="kpi"><div class="label">Health</div><div class="value mono" id="healthVal">—</div><div class="bar health"><i id="healthBar" style="width:0%"></i></div></div>
+            <div class="kpi"><div class="label">Hunger</div><div class="value mono" id="hungerVal">—</div><div class="bar hunger"><i id="hungerBar" style="width:0%"></i></div></div>
+            <div class="kpi"><div class="label">Biome</div><div class="value" id="biomeVal" style="font-size:14px">—</div><div class="small" id="weatherVal">—</div></div>
+            <div class="kpi"><div class="label">Gamemode</div><div class="value" id="modeVal" style="font-size:14px">—</div><div class="small mono" id="dimVal">—</div></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span class="status-pill thinking" id="activityPill">● Idle</span>
+            <span class="small mono" id="coordVal">x — y — z —</span>
+            <span class="small" id="nearbyVal"></span>
+          </div>
+        </div>
+      </div>
+      <!-- Vision -->
+      <div class="card">
+        <div class="card-h"><h2>Live Vision</h2><span class="small">first-person</span></div>
+        <div class="card-b" style="padding:10px">
+          <div class="viewer-wrap" id="viewerWrap">
+            <div class="viewer-empty" id="viewerEmpty">Enable <span class="mono">render_bot_view: true</span> in settings.<br>Auto-shows when Ayushi is in-game.</div>
+          </div>
+        </div>
+      </div>
+      <!-- Brain Intelligence Panel -->
+      <div class="split">
+        <!-- Neural Net -->
+        <div class="card">
+          <div class="card-h"><h2>Neural Net</h2><span class="small mono" id="nnMeta">—</span></div>
+          <div class="card-b">
+            <div class="gauge"><span class="small" style="width:72px">Danger</span><div class="track"><div class="fill" id="dangerFill" style="width:0%;background:var(--red)"></div></div><span class="mono small" id="dangerVal">—</span></div>
+            <div class="gauge"><span class="small" style="width:72px">Hunger</span><div class="track"><div class="fill" id="hungerRiskFill" style="width:0%;background:var(--amber)"></div></div><span class="mono small" id="hungerRiskVal">—</span></div>
+            <div class="gauge"><span class="small" style="width:72px">Ready</span><div class="track"><div class="fill" id="readyFill" style="width:0%;background:var(--green)"></div></div><span class="mono small" id="readyVal">—</span></div>
+            <div style="margin-top:10px;font-size:11px;color:var(--muted)">Sensor features</div>
+            <div id="featureBars" style="margin-top:4px"></div>
+            <div class="small mono" id="nnTrainVal" style="margin-top:8px">steps: 0 · replay: 0</div>
+            <div class="small mono" id="actionMemVal">action memory: 0 entries</div>
+          </div>
+        </div>
+        <!-- Quantum + Decision -->
+        <div class="card">
+          <div class="card-h"><h2>Quantum</h2><span class="small mono" id="quantumMeta">—</span></div>
+          <div class="card-b">
+            <div class="gauge"><span class="small" style="width:72px">Temp</span><div class="track"><div class="fill" id="tempFill" style="width:0%;background:var(--cyan)"></div></div><span class="mono small" id="tempVal">—</span></div>
+            <div class="gauge"><span class="small" style="width:72px">Entropy</span><div class="track"><div class="fill" id="entropyFill" style="width:0%;background:var(--purple)"></div></div><span class="mono small" id="entropyVal">—</span></div>
+            <div style="margin-top:10px;font-size:11px;color:var(--muted)">Need amplitudes</div>
+            <div id="needChips" style="margin-top:4px"></div>
+            <div class="small mono" id="quantumVia" style="margin-top:8px">via: —</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;gap:14px">
+      <!-- Decision Trace -->
+      <div class="card">
+        <div class="card-h"><h2>Trace</h2><span class="small">last 25 events</span></div>
+        <div class="card-b"><div class="log mono" id="traceLog"><div class="small">waiting for events…</div></div></div>
+      </div>
+      <!-- Inventory -->
+      <div class="card">
+        <div class="card-h"><h2>Inventory</h2><span class="small mono" id="invMeta">—</span></div>
+        <div class="card-b"><div class="inv-grid" id="invGrid"><div class="small">—</div></div></div>
+      </div>
+      <!-- Chat -->
+      <div class="card">
+        <div class="card-h"><h2>Chat</h2><span class="small">live</span></div>
+        <div class="card-b"><div class="log" id="chatLog"><div class="small">no messages yet</div></div>
+          <div class="controls" style="margin-top:10px">
+            <input id="chatInput" class="input" placeholder="Say something to Ayushi… (Enter to send)">
+            <button class="btn primary" id="chatSend">Send</button>
+            <button class="btn" id="stopBtn">Stop</button>
+          </div>
+        </div>
+      </div>
+      <!-- Controls -->
+      <div class="card">
+        <div class="card-h"><h2>Controls</h2></div>
+        <div class="card-b controls">
+          <button class="btn" onclick="quick('!come')">Come</button>
+          <button class="btn" onclick="quick('!stay')">Stay</button>
+          <button class="btn" onclick="quick('!follow')">Follow</button>
+          <button class="btn danger" onclick="quick('!stop')">Stop action</button>
+          <button class="btn" onclick="quick('!inventory')">Inventory</button>
+          <button class="btn" onclick="quick('!status')">Status</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const socket = io();
+const $ = s => document.getElementById(s);
+let currentAgent = null;
+let traceBuf = [];
+const chatBuf = [];
+const FEAT_NAMES = ['HP','Food','Sat','O₂','Armor','Inv','Threat','Hostiles','Player','Players'];
+
+function setOnline(on){
+  $('dot').className = 'dot ' + (on ? 'online' : 'offline');
+  $('liveBadge').textContent = on ? '● live' : '○ offline';
+}
+
+socket.on('connect', ()=>{ setOnline(true); socket.emit('listen-to-agents'); });
+socket.on('disconnect', ()=> setOnline(false));
+socket.on('connect_error', ()=> setOnline(false));
+
+socket.on('agents-status', (agents)=>{
+  if(!agents || !agents.length){ $('agentName').textContent='no agents'; return; }
+  const a = agents.find(x=>x.in_game) || agents[0];
+  currentAgent = a.name;
+  $('agentName').textContent = a.name + (a.in_game ? ' · in game' : ' · offline');
+  const wrap = $('viewerWrap');
+  let iframe = wrap.querySelector('iframe');
+  if(a.in_game && a.viewerPort){
+    if(!iframe){ iframe = document.createElement('iframe'); wrap.appendChild(iframe); }
+    const src = `http://localhost:${a.viewerPort}`;
+    if(iframe.src !== src) iframe.src = src;
+    $('viewerEmpty').style.display='none';
+  } else {
+    if(iframe) iframe.remove();
+    $('viewerEmpty').style.display='grid';
+  }
+});
+
+socket.on('state-update', (states)=>{
+  if(!currentAgent || !states[currentAgent]) return;
+  const s = states[currentAgent];
+  if(s.error){ trace(`state error: ${s.error}`); return; }
+  const g = s.gameplay || {};
+  const act = s.action || {};
+  const brain = s.brain || {};
+  // header
+  $('posBadge').textContent = g.position ? `x${g.position.x} y${g.position.y} z${g.position.z}` : '—';
+  // kpis
+  const h = g.health ?? 0; const hu = g.hunger ?? 0;
+  $('healthVal').textContent = `${h}/20`; $('healthBar').style.width = (h/20*100)+'%';
+  $('hungerVal').textContent = `${hu}/20`; $('hungerBar').style.width = (hu/20*100)+'%';
+  $('biomeVal').textContent = g.biome || '—'; $('weatherVal').textContent = `${g.weather||''} · ${g.timeLabel||''}`;
+  $('modeVal').textContent = g.gamemode || '—'; $('dimVal').textContent = g.dimension || '';
+  $('coordVal').textContent = g.position ? `x ${g.position.x}, y ${g.position.y}, z ${g.position.z}` : '—';
+  // activity
+  const pill = $('activityPill'); pill.textContent = '● ' + (act.current || 'Idle');
+  pill.className = 'status-pill ' + (act.kind || 'idle');
+  $('nearbyVal').textContent = s.nearby ? `${(s.nearby.humanPlayers||[]).length} players · ${(s.nearby.entityTypes||[]).join(', ')||'no mobs'}` : '';
+  // neural net
+  if(brain.neural){
+    const n = brain.neural;
+    setGauge('danger', n.danger, 'var(--red)');
+    setGauge('hungerRisk', n.hungerRisk, 'var(--amber)');
+    setGauge('ready', n.readiness, 'var(--green)');
+    $('nnTrainVal').textContent = `steps: ${n.trainSteps??0} · replay: ${n.replay??0}`;
+    $('nnMeta').textContent = `${n.trainSteps??0} steps`;
+  }
+  if(brain.actionMemory){
+    $('actionMemVal').textContent = `action memory: ${brain.actionMemory.entries} entries`;
+  }
+  // sensor features
+  if(brain.features){
+    renderFeatures(brain.features);
+  }
+  // quantum
+  if(brain.quantum){
+    const q = brain.quantum;
+    setGauge('temp', q.temperature, 'var(--cyan)');
+    setGauge('entropy', q.entropy, 'var(--purple)');
+    $('tempVal').textContent = q.temperature != null ? q.temperature.toFixed(2) : '—';
+    $('entropyVal').textContent = q.entropy != null ? q.entropy.toFixed(2) : '—';
+    $('quantumMeta').textContent = `${q.via||'born'} · ${q.decisions??0} decisions`;
+    $('quantumVia').textContent = `via: ${q.via||'—'} · chose: ${q.need||'—'}`;
+    if(q.amplitudes) renderNeedChips(q.amplitudes, q.need);
+  }
+  // inventory
+  const inv = s.inventory || {};
+  $('invMeta').textContent = `${inv.stacksUsed??0}/${inv.totalSlots??0} slots`;
+  const grid = $('invGrid');
+  const counts = inv.counts || {};
+  const entries = Object.entries(counts).sort((a,b)=>a[0].localeCompare(b[0]));
+  if(!entries.length) grid.innerHTML = '<div class="small">empty</div>';
+  else grid.innerHTML = entries.map(([k,v])=>{
+    const url = `/assets/item/${currentAgent}/${k}.png`;
+    return `<div class="inv-item"><img src="${url}" onerror="this.style.display='none'"><span class="inv-count">${v}</span><span class="inv-name">${k.replace(/_/g,' ')}</span></div>`;
+  }).join('');
+});
+
+function setGauge(name, val, color){
+  const pct = ((val||0)*100)+'%';
+  $(name+'Fill').style.width = pct;
+  $(name+'Val').textContent = val != null ? val.toFixed(2) : '—';
+}
+
+function renderFeatures(feats){
+  const el = $('featureBars');
+  const max = feats.length;
+  el.innerHTML = feats.map((v,i)=>{
+    const name = FEAT_NAMES[i] || `F${i}`;
+    const c = v > 0.7 ? 'var(--red)' : v > 0.4 ? 'var(--amber)' : 'var(--green)';
+    return `<div class="feat-row"><span class="feat-label">${name}</span><div class="feat-track"><div class="feat-fill" style="width:${v*100}%;background:${c}"></div></div><span class="feat-val">${v.toFixed(2)}</span></div>`;
+  }).join('');
+}
+
+function renderNeedChips(amplitudes, winner){
+  const el = $('needChips');
+  const sorted = Object.entries(amplitudes).sort((a,b)=>b[1]-a[1]);
+  el.innerHTML = sorted.map(([name, amp])=>{
+    const isWinner = name === winner;
+    return `<span class="chip ${isWinner?'winner':'loser'}">${name} ${amp.toFixed(2)}</span>`;
+  }).join('');
+}
+
+socket.on('bot-output', (agentName, msg)=>{
+  if(currentAgent && agentName !== currentAgent) return;
+  trace(`[${agentName}] ${msg}`);
+  chatBuf.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+  if(chatBuf.length>60) chatBuf.shift();
+  renderChat();
+});
+
+function trace(line){
+  traceBuf.push(`[${new Date().toLocaleTimeString()}] ${line}`);
+  if(traceBuf.length>100) traceBuf.shift();
+  const el=$('traceLog'); el.innerHTML = traceBuf.slice(-25).map(l=>`<div class="entry">${esc(l)}</div>`).join('') || '<div class="small">—</div>';
+  el.scrollTop = el.scrollHeight;
+}
+function renderChat(){
+  const el=$('chatLog'); el.innerHTML = chatBuf.slice(-20).map(l=>`<div class="entry">${esc(l)}</div>`).join('') || '<div class="small">no messages yet</div>';
+  el.scrollTop = el.scrollHeight;
+}
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c])); }
+function quick(cmd){
+  if(!currentAgent) return;
+  socket.emit('send-message', currentAgent, {from:'ADMIN', message: cmd});
+  trace(`→ ${cmd}`);
+}
+$('chatSend').onclick = ()=>{
+  const v=$('chatInput').value.trim(); if(!v||!currentAgent) return;
+  socket.emit('send-message', currentAgent, {from:'ADMIN', message: v});
+  trace(`→ you: ${v}`); $('chatInput').value='';
+};
+$('chatInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('chatSend').click(); });
+$('stopBtn').onclick = ()=> quick('!stop');
+</script>
+</body>
+</html>

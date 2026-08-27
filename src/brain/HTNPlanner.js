@@ -92,10 +92,10 @@ export class HTNPlanner extends Planner {
     const planContext = {
       goal,
       priority: taskDef.priority,
-      steps: ordered.map(n => ({
-        skill: this._operatorToSkill(n.operator, n.params),
-        params: n.params,
-      })),
+      steps: ordered.map(n => {
+        const { skill, params } = this._mapStep(n.operator, n.params);
+        return { skill, params };
+      }),
       assumptions: taskDef.preconditions,
       requiredResources: [],
       blockers: this._findBlockers(ordered, sv),
@@ -245,11 +245,20 @@ export class HTNPlanner extends Planner {
   // ─── Private: mapping ───────────────────────────────────────
 
   _operatorToSkill(operator, params) {
+    return this._mapStep(operator, params).skill;
+  }
+
+  /**
+   * Map an operator + params to a skill + remapped params.
+   * Returns { skill, params } with naming divergences fixed.
+   */
+  _mapStep(operator, params) {
     const skillMap = {
       Acquire: 'collect',
       Travel: 'move_to',
       Interact: 'interact',
       Craft: 'craft',
+      CraftPlanks: 'craft_planks',
       Smelt: 'smelt',
       Farm: 'farm',
       Use: 'eat',
@@ -260,7 +269,17 @@ export class HTNPlanner extends Planner {
       Wait: 'wait',
       Collect: 'collect',
     };
-    return skillMap[operator] || operator?.toLowerCase() || 'wait';
+    const skill = skillMap[operator] || operator?.toLowerCase() || 'wait';
+    // Remap operator params → skill params where naming diverges.
+    const out = { ...params };
+    if (skill === 'collect' && out.resource && !out.item) {
+      out.item = out.resource;
+      delete out.resource;
+    }
+    if (skill === 'smelt' && out.count && !out.input) {
+      out.input = out.resource || out.item;
+    }
+    return { skill, params: out };
   }
 
   _skillToOperator(skill) {
@@ -269,6 +288,7 @@ export class HTNPlanner extends Planner {
       move_to: 'Travel',
       interact: 'Interact',
       craft: 'Craft',
+      craft_planks: 'CraftPlanks',
       smelt: 'Smelt',
       farm: 'Farm',
       eat: 'Use',

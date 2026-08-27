@@ -13,6 +13,7 @@ export const WEIGHTS = {
     buildShelter: 35,
     mineResources: 30,
     craftGear: 28,
+    stashLoot: 22,   // deposit when bag is heavy — below survival, above idle work
 };
 
 const RETREAT_HP_THRESHOLD = 6;
@@ -39,6 +40,8 @@ export class UtilityScorer {
         this._scoreGoal(state, memory, candidates);
         this._scoreMining(state, candidates);
         this._scoreBuilding(state, candidates);
+        // Inventory pressure: stash loot at a chest before gathering more
+        this._scoreStashLoot(state, candidates);
         // MUST run after _scoreGoal: _scoreGathering's claim-penalty
         // iterates all existing candidates applying 0.1x to gather/buildShelter
         this._scoreGathering(state, memory, candidates);
@@ -186,6 +189,18 @@ export class UtilityScorer {
                 }
             }
         }
+    }
+
+    _scoreStashLoot(state, candidates) {
+        // Only when the bag is getting heavy (≤4 free slots) and we carry
+        // actual loot worth stashing (not just tools).
+        const free = state.self.freeSlots ?? 27;
+        if (free > 4) return;
+        const hasLoot = state.self.inventory.some(i =>
+            /ingot|diamond|emerald|raw_|redstone|lapis|_ore|iron$|gold$/.test(i.name));
+        if (!hasLoot) return;
+        const urgency = 1 + (4 - free) / 4; // 1.0 → ~2.0
+        candidates.push({ action: 'stashLoot', score: WEIGHTS.stashLoot * urgency });
     }
 
     _scoreEfficiency(state, candidates) {

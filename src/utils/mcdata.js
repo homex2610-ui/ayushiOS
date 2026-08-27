@@ -1,6 +1,8 @@
+
 import minecraftData from 'minecraft-data';
 import settings from '../agent/settings.js';
 import { createBot } from 'mineflayer';
+import { applyFabricCompat } from './fabric_compat.js';
 import prismarine_items from 'prismarine-item';
 import { pathfinder } from 'mineflayer-pathfinder';
 import { plugin as pvp } from 'mineflayer-pvp';
@@ -69,6 +71,11 @@ export function initBot(username) {
 
     const bot = createBot(options);
 
+    // --- FABRIC COMPAT: answer login-phase plugin probes so modded
+    // servers (Fabric + CreativeCore etc.) don't kick us at handshake ---
+    if (settings.fabric_compat !== false) {
+        applyFabricCompat(bot);
+    }
     // --- AUTOMATIC AUTHENTICATION (AuthHandler module) ---
     const authHandler = setupAuthHandler(bot, username);
     // AuthHandler attaches its own message/spawn listeners internally.
@@ -121,11 +128,28 @@ export function initBot(username) {
         return originalEmit(event, ...args);
     };
 
-    bot.loadPlugin(pathfinder);
-    bot.loadPlugin(pvp);
-    bot.loadPlugin(collectblock);
-    bot.loadPlugin(autoEat);
-    bot.loadPlugin(armorManager); // auto equip armor
+    // P0: guarded plugin loads — a silent failure here disables ALL
+    // block collection (bot.collectBlock undefined) with zero symptoms.
+    const loadOrWarn = (name, plugin) => {
+        try { bot.loadPlugin(plugin); }
+        catch (e) { console.error(`[mcdata] ⚠ loadPlugin(${name}) FAILED: ${e.message}`); }
+    };
+    loadOrWarn('pathfinder', pathfinder);
+    loadOrWarn('pvp', pvp);
+    loadOrWarn('collectblock', collectblock);
+    loadOrWarn('autoEat', autoEat);
+    loadOrWarn('armorManager', armorManager); // auto equip armor
+
+    // Verify critical plugins actually materialized (some register lazily
+    // on spawn; if still absent post-spawn, collections would silently no-op).
+    bot.once('spawn', () => {
+        if (!bot.collectBlock?.collect) {
+            console.error('[mcdata] ⚠⚠ bot.collectBlock MISSING after spawn — block collection will fail. Reconnecting may fix the race.');
+        }
+        if (!bot.tool?.equipForBlock) {
+            console.warn('[mcdata] ⚠ bot.tool missing — tool equipping degraded');
+        }
+    });
     bot.on('resourcePack', (url, hash) => {
         console.log(`[ResourcePack] Server requested pack: ${url}. Auto-accepting...`);
         bot.acceptResourcePack();
@@ -162,10 +186,40 @@ export function mustCollectManually(blockName) {
     return full_names.includes(blockName.toLowerCase()) || partial_names.some(partial => blockName.toLowerCase().includes(partial));
 }
 
+// Generic names players/bots use that map to concrete registry items.
+// 'bed' has no item entry (beds are colored: red_bed, white_bed, ...).
+const ITEM_ALIASES = {
+    bed: ['red_bed', 'white_bed', 'blue_bed', 'green_bed', 'black_bed', 'yellow_bed', 'lime_bed', 'brown_bed', 'orange_bed', 'purple_bed'],
+    wool: ['white_wool', 'red_wool', 'blue_wool'],
+    carpet: ['white_carpet', 'red_carpet'],
+};
+
+/** Resolve an alias like "bed" to a concrete item name that exists in this MC version. */
+export function resolveItemAlias(itemName) {
+    const candidates = ITEM_ALIASES[itemName];
+    if (!candidates) return itemName;
+    for (const c of candidates) {
+        if (mcdata.itemsByName[c]) return c;
+        // Blocks may exist even when the item form differs
+        if (mcdata.blocksByName[c] && mcdata.itemsByName[getBlockName(mcdata.blocksByName[c].id)]) return getBlockName(mcdata.blocksByName[c].id);
+    }
+    // Fall back to the first known *_<alias> item (e.g. any colored variant)
+    const suffix = '_' + itemName;
+    for (const key in mcdata.itemsByName) {
+        if (key.endsWith(suffix)) return key;
+    }
+    return itemName;
+}
+
 export function getItemId(itemName) {
     let item = mcdata.itemsByName[itemName];
     if (item) {
         return item.id;
+    }
+    const resolved = resolveItemAlias(itemName);
+    if (resolved !== itemName) {
+        item = mcdata.itemsByName[resolved];
+        if (item) return item.id;
     }
     return null;
 }
@@ -254,8 +308,8 @@ export function getAllBiomes() {
 
 export function getItemCraftingRecipes(itemName) {
     let itemId = getItemId(itemName);
-    if (!mcdata.recipes[itemId]) {
-        return null;
+    if (itemId == null || !mcdata.recipes[itemId]) {
+        return [];
     }
 
     let recipes = [];
@@ -409,13 +463,55 @@ export function ingredientsFromPrismarineRecipe(recipe) {
  * @param {boolean} discrete - Is the action discrete?
  * @returns {{num: number, limitingResource: (T | null)}} the number of times the action can be completed and the limmiting resource; e.g `{num: 2, limitingResource: 'cobble_stone'}`
  */
+/**
+ * Normalizes an ingredients map so that interchangeable variants (planks, logs)
+ * are collapsed to a single family key. This lets calculateLimitingResource
+ * match acacia_planks against a recipe that says oak_planks.
+ */
+const INTERCHANGEABLE_FAMILIES = {
+    planks: n => !!n && n.endsWith('_planks'),
+    log: n => !!n && (n === 'log' || n.endsWith('_log')),
+};
+export function normalizeIngredients(ingredients) {
+    const out = {};
+    for (const [item, count] of Object.entries(ingredients)) {
+        let familyKey = null;
+        for (const [family, test] of Object.entries(INTERCHANGEABLE_FAMILIES)) {
+            if (test(item)) { familyKey = family; break; }
+        }
+        const key = familyKey || item;
+        out[key] = (out[key] || 0) + count;
+    }
+    return out;
+}
+/**
+ * Like calculateLimitingResource but treats planks and logs as interchangeable families.
+ * E.g. recipe needs oak_planks:4, inventory has acacia_planks:4 → num=1 (can craft).
+ */
+export function calculateCraftLimit(inventory, requiredIngredients, discrete=true) {
+    // Build a merged inventory keyed by family
+    const merged = {};
+    for (const [item, count] of Object.entries(inventory)) {
+        let familyKey = null;
+        for (const [family, test] of Object.entries(INTERCHANGEABLE_FAMILIES)) {
+            if (test(item)) { familyKey = family; break; }
+        }
+        const key = familyKey || item;
+        merged[key] = (merged[key] || 0) + count;
+    }
+    // Normalize recipe ingredients to same family keys
+    const normalized = normalizeIngredients(requiredIngredients);
+    return calculateLimitingResource(merged, normalized, discrete);
+}
+
 export function calculateLimitingResource(availableItems, requiredItems, discrete=true) {
     let limitingResource = null;
     let num = Infinity;
     for (const itemType in requiredItems) {
-        if (availableItems[itemType] < requiredItems[itemType] * num) {
+        const have = availableItems[itemType] || 0;
+        if (have < requiredItems[itemType] * num) {
             limitingResource = itemType;
-            num = availableItems[itemType] / requiredItems[itemType];
+            num = have / requiredItems[itemType];
         }
     }
     if(discrete) num = Math.floor(num);
@@ -578,3 +674,5 @@ function formatPlan(targetItem, { required, steps, leftovers }) {
 
     return lines.join('\n');
 }
+
+

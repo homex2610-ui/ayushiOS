@@ -36,6 +36,13 @@ export class ScoreboardAnalyzer {
             this._lastSnapshot = snapshot;
             this._changeCount++;
 
+            // Reader-shaped view: ServerSemanticLayer reads kb.get('scoreboard')
+            // expecting { title, lines }. Write it first, then the scalar keys
+            // below merge into the same node (raw/lastUpdate/updateCount preserved).
+            this.kb.set('scoreboard', {
+                title: sb.sidebar?.title?.text || sb.belowName?.title?.text || '',
+                lines,
+            });
             this.kb.set('scoreboard.raw', snapshot);
             this.kb.set('scoreboard.lastUpdate', Date.now());
             this.kb.set('scoreboard.updateCount', this._changeCount);

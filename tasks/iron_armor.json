@@ -1,0 +1,41 @@
+[
+  { "skill": "chat", "params": { "message": "Starting iron armor grind — survival first, then armor." } },
+
+  { "skill": "eat", "params": { "minFoodLevel": 18 } },
+
+  { "skill": "collect", "params": { "item": "log", "count": 8 } },
+  { "skill": "craft_planks", "params": { "count": 32 } },
+  { "skill": "craft", "params": { "item": "stick", "count": 16 } },
+  { "skill": "craft", "params": { "item": "crafting_table", "count": 1 } },
+  { "skill": "craft", "params": { "item": "wooden_pickaxe", "count": 1 } },
+  { "skill": "craft", "params": { "item": "wooden_sword", "count": 1 } },
+  { "skill": "equip", "params": { "item": "wooden_sword", "slot": "hand" } },
+  { "skill": "place_nearby", "params": { "block": "crafting_table" } },
+
+  { "skill": "collect", "params": { "item": "cobblestone", "count": 32 } },
+  { "skill": "craft", "params": { "item": "stone_pickaxe", "count": 1 } },
+  { "skill": "craft", "params": { "item": "stone_sword", "count": 1 } },
+  { "skill": "craft", "params": { "item": "stone_axe", "count": 1 } },
+  { "skill": "craft", "params": { "item": "furnace", "count": 1 } },
+  { "skill": "equip", "params": { "item": "stone_pickaxe", "slot": "hand" } },
+  { "skill": "place_nearby", "params": { "block": "furnace" } },
+
+  { "skill": "collect", "params": { "item": "coal", "count": 16 } },
+  { "skill": "collect", "params": { "item": "iron_ore", "count": 32 } },
+
+  { "skill": "smelt", "params": { "input": "raw_iron", "count": 32, "fuel": "coal" } },
+  { "skill": "craft", "params": { "item": "iron_pickaxe", "count": 1 } },
+  { "skill": "craft", "params": { "item": "shield", "count": 1 } },
+  { "skill": "equip", "params": { "item": "iron_pickaxe", "slot": "hand" } },
+
+  { "skill": "craft", "params": { "item": "iron_helmet", "count": 1 } },
+  { "skill": "craft", "params": { "item": "iron_chestplate", "count": 1 } },
+  { "skill": "craft", "params": { "item": "iron_leggings", "count": 1 } },
+  { "skill": "craft", "params": { "item": "iron_boots", "count": 1 } },
+  { "skill": "equip", "params": { "item": "iron_chestplate", "slot": "torso" } },
+  { "skill": "equip", "params": { "item": "iron_leggings", "slot": "legs" } },
+  { "skill": "equip", "params": { "item": "iron_boots", "slot": "feet" } },
+  { "skill": "equip", "params": { "item": "iron_helmet", "slot": "head" } },
+
+  { "skill": "chat", "params": { "message": "Full iron armor + shield achieved! Ready for anything." } }
+]

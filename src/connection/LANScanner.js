@@ -15,15 +15,24 @@ export class LANScanner {
         }
         this._scanning = true;
         try {
-            console.log(`[LANScanner] Quick scan on ${ip}...`);
+            console.log(`[LANScanner] Scanning for LAN worlds on ${ip}...`);
 
-            const quickResult = await this._quickScan(ip, 4000);
+            // Scan common Minecraft ports first
+            const quickResult = await this._quickScan(ip, 5000);
             if (quickResult) {
                 console.log(`[LANScanner] Found LAN server: ${quickResult.host}:${quickResult.port}`);
                 return quickResult;
             }
 
-            console.log('[LANScanner] No LAN world detected. Proceeding to public server.');
+            // Try scanning the wider port range that Minecraft LAN uses
+            console.log('[LANScanner] Scanning wider port range (49000-65535)...');
+            const wideResult = await this._quickBatchScan(ip, 10000);
+            if (wideResult) {
+                console.log(`[LANScanner] Found LAN server: ${wideResult.host}:${wideResult.port}`);
+                return wideResult;
+            }
+
+            console.log('[LANScanner] No LAN world detected.');
             return null;
         } finally {
             this._scanning = false;
@@ -53,9 +62,9 @@ export class LANScanner {
 
     async _quickBatchScan(ip, timeoutMs) {
         const startPort = 49000;
-        const endPort = 65000;
-        const batchTimeout = Math.min(timeoutMs, 3000);
-        const timeout = 80;
+        const endPort = 65535;
+        const batchTimeout = Math.min(timeoutMs, 10000);
+        const timeout = 50;
 
         const checkPort = (port) => {
             return new Promise((resolve) => {
@@ -68,12 +77,12 @@ export class LANScanner {
             });
         };
 
-        const BATCH_SIZE = 512;
+        const BATCH_SIZE = 1024;
         const originalConsoleLog = console.log;
         console.log = () => {};
 
         try {
-            const maxBatches = Math.ceil(batchTimeout / 300);
+            const maxBatches = Math.ceil(batchTimeout / 200);
             for (let batch = 0; batch < maxBatches; batch++) {
                 const batchStart = startPort + (batch * BATCH_SIZE);
                 const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, endPort);
@@ -87,7 +96,7 @@ export class LANScanner {
                 const openPorts = results.filter(p => p !== null);
 
                 for (const port of openPorts) {
-                    const server = await this._serverInfo(ip, port, 150);
+                    const server = await this._serverInfo(ip, port, 200);
                     if (server) return server;
                 }
             }

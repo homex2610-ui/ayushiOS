@@ -21,12 +21,12 @@ export class EconomyAnalyzer {
             if (m) {
                 this.kb.set('economy.enabled', true);
                 if (p.type === 'balance_check') {
-                    const amt = parseFloat(m[1].replace(',', ''));
+                    const amt = parseFloat(m[1].replace(/,/g, ''));
                     if (!isNaN(amt)) this.kb.set('economy.lastBalance', amt);
                 }
                 if ((p.type === 'shop' || p.type === 'buy' || p.type === 'sell') && m[2]) {
                     const item = (m[1] || '').trim().toLowerCase();
-                    const price = parseFloat(m[2].replace(',', ''));
+                    const price = parseFloat(m[2].replace(/,/g, ''));
                     if (item && !isNaN(price)) {
                         if (!this._prices[item]) this._prices[item] = [];
                         this._prices[item].push({ price, type: p.type, ts: Date.now() });
@@ -51,7 +51,8 @@ export class EconomyAnalyzer {
             }
         }
         const currencyNames = [
-            { re: /(\d+[.,]?\d*)\s*(?:coins?|gold|dollars?|credits?|tokens?)/i, name: null },
+            // Group 2 captures the currency word so `economy.currency` populates.
+            { re: /(\d+[.,]?\d*)\s*((?:coins?|gold|dollars?|credits?|tokens?))/i, name: null },
         ];
         for (const cn of currencyNames) {
             const m = msg.match(cn.re);

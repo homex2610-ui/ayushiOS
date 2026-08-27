@@ -1,17 +1,18 @@
 const settings = {
-    "minecraft_version": "auto", // "auto" detects version; or set a specific version like "1.21.4"
-    "host": "localhost", // server IP: "localhost", "your.ip.address.here", or "play.example.com"
-    "port": -1, // -1 auto-scans LAN; set specific port for servers (e.g. 25565)
+    "minecraft_version": "1.21.11", // Match Docker server version
+    "host": "127.0.0.1",
+    "port": 59446,
     "auth": "offline", // "offline" for cracked servers / singleplayer LAN; "microsoft" for premium servers
     "password": process.env.MC_PASSWORD || "", // Password for auto-/register and /login (AuthMe, etc.)
 
     // the mindserver manages all agents and hosts the UI
     "mindserver_port": 8080,
-    "auto_open_ui": false, // opens UI in browser on startup
+    "auto_open_ui": true, // opens dashboard in browser on startup
     
     "base_profile": "assistant", // survival, assistant, creative, or god_mode
     "profiles": [
         "./andy.json",
+        // "./player2_guide.json", // companion bot — needs llamacpp on :4315; re-enable when running it
         // "./profiles/gpt.json",
         // "./profiles/claude.json",
         // "./profiles/gemini.json",
@@ -39,8 +40,9 @@ const settings = {
 
     "chat_ingame": true, // bot responses are shown in minecraft chat
     "language": "en", // translate to/from this language. Supports these language names: https://cloud.google.com/translate/docs/languages
-    "render_bot_view": false, // show bot's view in browser at localhost:3000, 3001...
+    "render_bot_view": true, // show bot's view in browser at localhost:3000, 3001... (dashboard vision)
 
+    "fabric_compat": true, // disable Fabric mod declarations for vanilla cracked servers
     "allow_insecure_coding": false, // allows newAction command and model can write/run code on your computer. enable at own risk
     "allow_vision": false, // allows vision model to interpret screenshots as inputs
     "blocked_actions" : ["!checkBlueprint", "!checkBlueprintLevel", "!getBlueprint", "!getBlueprintLevel"] , // commands to disable and remove from docs. Ex: ["!setMode"]
@@ -77,12 +79,12 @@ const settings = {
     "enable_llm": false, // false = no LLM calls at all; relies on BT, intent pipeline, and canned responses
 
     // Behavior Tree AI — replaces LLM per-tick decisions with utility scoring
-    "bt_enabled": true, // autonomous utility-AI behavior tree (overrides self_prompter/goal_planner)
+    "bt_enabled": false, // P0-4: BT strategic brain DISABLED — ExecutiveBrain is sole strategist. SpinalCord owns reflexes. Set true only for legacy debugging.
     "bt_log": false, // verbose BT decision logging
 
     // Connection & World Management
-    "connection_prefer_lan": true, // skip LAN scan, go straight to configured SMP
-    "connection_auto_fallback": false, // fall back to public SMP if LAN unavailable
+    "connection_prefer_lan": true, // scan LAN (127.0.0.1) first for local worlds before using configured SMP
+    "connection_auto_fallback": true, // fall back to public SMP if LAN unavailable
     "connection_auto_reconnect": true, // auto reconnect on disconnect
     "connection_auto_detect_hub": false, // disabled - connect directly, let bot work even in hub spawn
 
@@ -96,7 +98,8 @@ const settings = {
     "terminal_console_prefix": "/", // prefix for terminal commands
 
     "enable_brain": true, // AyushiOS autonomous brain (need/emotion/personality system)
-    "auto_task": false, // set to true to auto-load tasks/diamond_grind.json
+    "auto_task": true, // every run starts with the standing goal (tasks/iron_armor.json; override via auto_task_file)
+    "auto_task_file": "./tasks/iron_armor_house.json", // combined goal: iron armor + small house
 
     "goal_plan_interval": 120000, // ms between autonomous plan cycles
     "episodic_replay_interval": 1500000, // ms between memory consolidation (~25min)

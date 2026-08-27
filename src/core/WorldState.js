@@ -34,7 +34,7 @@ export class WorldState {
         const nearbyEntities = [];
         if (bot.entities) {
             for (const [id, entity] of Object.entries(bot.entities)) {
-                if (id === bot.entity.id) continue;
+                if (Number(id) === bot.entity.id) continue;
                 const dist = entity.position?.distanceTo(pos);
                 nearbyEntities.push({
                     id,
@@ -47,12 +47,13 @@ export class WorldState {
             }
         }
 
-        const scoreboard = bot.scoreboard ? {
-            title: bot.scoreboard.title,
-            lines: bot.scoreboard.items?.map(i => ({
+        const sb = bot.scoreboard?.sidebar;
+        const scoreboard = sb ? {
+            title: sb.title ?? null,
+            lines: (sb.items || []).map(i => ({
                 name: i.name,
                 value: i.value
-            })) || []
+            }))
         } : null;
 
         const window = bot.currentWindow ? {

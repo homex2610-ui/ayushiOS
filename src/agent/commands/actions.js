@@ -582,10 +582,57 @@ export const actionsList = [
     },
     {
         name: '!organizeInventory',
-        description: 'Deposit all inventory items into the nearest chest.',
+        description: 'Smart inventory management: deposit LOOT into nearest chest while keeping your survival kit (tools/food/torches/armor), then sort and arrange your hotbar.',
         params: {},
         perform: runAsAction(async (agent) => {
-            await skills.organizeInventory(agent.bot);
+            const im = agent.inventoryManager;
+            if (im) {
+                const summary = await im.depositLoot();
+                await im.compact({ sort: true });
+                await im.ensureHotbarLoadout();
+                agent.openChat(`Inventory organized. Deposited: ${summary}. Bag sorted, hotbar arranged.`);
+            } else {
+                // Fallback to old behavior only if InventoryManager failed to load
+                await skills.organizeInventory(agent.bot);
+            }
+        })
+    },
+    {
+        name: '!sortInventory',
+        description: 'Merge stacks, sort by category, and arrange pro hotbar loadout (weapon/pickaxe/shovel/axe/food/torches/blocks). No depositing.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            const im = agent.inventoryManager;
+            if (!im) { agent.openChat('InventoryManager unavailable.'); return; }
+            await im.compact({ sort: true });
+            await im.ensureHotbarLoadout();
+            const g = im.gearReport();
+            const gearStr = g.weakestArmor ? ` Weakest armor: ${g.weakestArmor.name} at ${g.weakestArmor.dur}%.` : '';
+            agent.openChat(`Sorted + hotbar arranged.${gearStr}`);
+        })
+    },
+    {
+        name: '!restock',
+        description: 'Withdraw missing survival supplies (torches, food) from the nearest chest.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            const im = agent.inventoryManager;
+            if (!im) { agent.openChat('InventoryManager unavailable.'); return; }
+            const summary = await im.restockFromChest();
+            agent.openChat(`Restocked from chest: ${summary}.`);
+        })
+    },
+    {
+        name: '!gearReport',
+        description: 'Check durability of held tool and armor pieces.',
+        params: {},
+        perform: runAsAction(async (agent) => {
+            const im = agent.inventoryManager;
+            if (!im) { agent.openChat('InventoryManager unavailable.'); return; }
+            const g = im.gearReport();
+            const hand = g.hand ? `${g.hand.name} (${g.hand.dur}%)` : 'empty hand';
+            const armor = g.armor.length ? g.armor.map(a => `${a.name}: ${a.dur}%`).join(', ') : 'none';
+            agent.openChat(`Hand: ${hand}. Armor: ${armor}.`);
         })
     },
     {
@@ -770,6 +817,53 @@ export const actionsList = [
             const tasks = TaskRunner.getAvailableTasks();
             if (tasks.length === 0) return 'No task files found in tasks/ folder.';
             return `Available tasks:\n${tasks.map(t => `  - ${t}`).join('\n')}\nRun with !runTask("taskName")`;
+        }
+    },
+    // ── Inventory management commands (InventoryManager) ──────────
+    {
+        name: '!sortInv',
+        description: 'Compact item stacks, sort inventory by category, and arrange a pro hotbar loadout.',
+        params: {},
+        perform: async function (agent) {
+            const im = agent.inventoryManager;
+            if (!im) return 'InventoryManager not initialized.';
+            await im.compact({ sort: true });
+            await im.ensureHotbarLoadout();
+            return 'Inventory sorted and hotbar arranged.';
+        }
+    },
+    {
+        name: '!stash',
+        description: 'Walk to nearest chest and deposit loot while keeping tools/food/torches/essentials.',
+        params: {},
+        perform: async function (agent) {
+            const im = agent.inventoryManager;
+            if (!im) return 'InventoryManager not initialized.';
+            return await agent.actions.runAction('action:stash', async () => im.depositLoot());
+        }
+    },
+    {
+        name: '!restock',
+        description: 'Withdraw missing survival supplies (torches, food) from nearest chest.',
+        params: {},
+        perform: async function (agent) {
+            const im = agent.inventoryManager;
+            if (!im) return 'InventoryManager not initialized.';
+            return await agent.actions.runAction('action:restock', async () => im.restockFromChest());
+        }
+    },
+    {
+        name: '!gear',
+        description: 'Report gear durability and inventory pressure (free slots, needs).',
+        params: {},
+        perform: async function (agent) {
+            const im = agent.inventoryManager;
+            if (!im) return 'InventoryManager not initialized.';
+            const g = im.gearReport();
+            const n = im.needs();
+            const hand = g.hand ? `${g.hand.name} (${g.hand.dur}%)` : 'empty hand';
+            const armor = g.armor.length ? g.armor.map(a => `${a.name} ${a.dur}%`).join(', ') : 'none equipped';
+            return `Hand: ${hand}\nArmor: ${armor}\nFree slots: ${im.freeSlots()}/36\nNeeds: ${JSON.stringify(n)}`;
         }
     },
 ];

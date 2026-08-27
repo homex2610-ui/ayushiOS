@@ -57,13 +57,13 @@ const BASE_STATE = {
 
 console.log('\n=== 1. Domain Integrity ===\n');
 
-// All expected task names
-const expectedTasks = ['eat', 'seek_safety', 'avoid_hazard', 'farm_food', 'craft_gear', 'build_base', 'visit_known_warp', 'explore_unknown', 'socialize'];
-assertEqual(taskNames().sort().join(','), expectedTasks.sort().join(','), 'All 9 executive tasks defined');
+// All expected task names (P0-3: advance_capability added to domain)
+const expectedTasks = ['eat', 'seek_safety', 'avoid_hazard', 'farm_food', 'craft_gear', 'advance_capability', 'build_base', 'visit_known_warp', 'explore_unknown', 'socialize'];
+assertEqual(taskNames().sort().join(','), expectedTasks.sort().join(','), 'All executive tasks defined');
 
 // All operators defined
-const expectedOperators = ['Acquire', 'Travel', 'Interact', 'Craft', 'Smelt', 'Farm', 'Use', 'Equip', 'Combat', 'Escape', 'Observe', 'Wait', 'Collect'];
-assertEqual(operatorNames().sort().join(','), expectedOperators.sort().join(','), 'All 13 operators defined');
+const expectedOperators = ['Acquire', 'Travel', 'Interact', 'Craft', 'CraftPlanks', 'Smelt', 'Farm', 'Use', 'Equip', 'Combat', 'Escape', 'Observe', 'Wait', 'Collect'];
+assertEqual(operatorNames().sort().join(','), expectedOperators.sort().join(','), 'All operators defined');
 
 // Each task has required fields
 for (const name of expectedTasks) {
@@ -312,7 +312,8 @@ import('../../src/brain/ExecutiveBrain.js').then(mod => {
   assert(!!decision, 'decision() returns a result');
   assert(typeof decision.task === 'string', 'decision().task is a string');
   assert(Array.isArray(decision.steps), 'decision().steps is an array');
-  assert(typeof decision.context === 'object' && decision.context !== null, 'decision().context is an object');
+  // P0-3: decide() returns {task, steps} — plan context lives in MotorCortex
+  assert(decision.context === undefined, 'decision() carries no context (motor owns it)');
 
   console.log(`\n  Decided task: ${decision.task}`);
   console.log(`  Steps: ${decision.steps.map(s => s.skill).join(', ')}`);

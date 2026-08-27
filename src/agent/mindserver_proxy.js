@@ -22,9 +22,12 @@ class MindServerProxy {
         this.socket = io(`http://localhost:${port}`);
 
         await new Promise((resolve, reject) => {
-            this.socket.on('connect', resolve);
-            this.socket.on('connect_error', (err) => {
-                console.error('Connection failed:', err);
+            this.socket.once('connect', resolve);
+            this.socket.once('connect_error', (err) => {
+                console.error('Connection failed:', err?.message || err);
+                // socket.io retries forever by default — a rejected connect()
+                // must close the client or zombie sockets pile up per attempt.
+                try { this.socket.close(); } catch (_) { /* already closed */ }
                 reject(err);
             });
         });

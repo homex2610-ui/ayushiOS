@@ -203,7 +203,9 @@ class ConversationManager {
             await agent.self_prompter.pause();
         }
     
-        _scheduleProcessInMessage(sender, received, convo);
+        _scheduleProcessInMessage(sender, received, convo).catch(e => {
+            console.error('Error scheduling in-message processing:', e);
+        });
     }
 
     responseScheduledFor(sender) {
@@ -239,7 +241,7 @@ class ConversationManager {
     endConversation(sender) {
         if (this.convos[sender]) {
             this.convos[sender].end();
-            if (this.activeConversation.name === sender) {
+            if (this.activeConversation && this.activeConversation.name === sender) {
                 this._stopMonitor();
                 this.activeConversation = null;
                 if (agent.self_prompter.isPaused() && !this.inConversation()) {
@@ -293,7 +295,7 @@ async function _scheduleProcessInMessage(sender, received, convo) {
         // both are busy
         let canTalkOver = talkOverActions.some(a => agent.actions.currentActionLabel.includes(a));
         if (canTalkOver)
-            scheduleResponse(fastDelay)
+            scheduleResponse(fastDelay);
         // otherwise don't respond
     }
     else if (otherAgentBusy)
@@ -306,7 +308,15 @@ async function _scheduleProcessInMessage(sender, received, convo) {
             scheduleResponse(fastDelay);
         }
         else {
-            let shouldRespond = await agent.prompter.promptShouldRespondToBot(received.message);
+            let shouldRespond = false;
+            try {
+                shouldRespond = await agent.prompter.promptShouldRespondToBot(received.message);
+            } catch (e) {
+                // LLM failure (rate limits, all models cooling) must not reject
+                // this fire-and-forget chain — default to staying quiet.
+                console.warn(`Error deciding whether to respond to ${sender}:`, e.message || e);
+                shouldRespond = false;
+            }
             console.log(`${agent.name} decided to ${shouldRespond?'respond':'not respond'} to ${sender}`);
             if (shouldRespond)
                 scheduleResponse(fastDelay);

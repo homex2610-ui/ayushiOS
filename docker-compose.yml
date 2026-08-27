@@ -1,27 +1,19 @@
+version: '3.8'
 services:
-  mindcraft:
-    build: .
+  mc:
+    image: itzg/minecraft-server:latest
+    restart: unless-stopped
     environment:
-      SETTINGS_JSON: |
-        {"auto_open_ui": false}
-    volumes:
-      - ./settings.js:/app/settings.js
-      - ./keys.json:/app/keys.json
-      - ./profiles:/app/profiles
-      - ./bots:/app/bots
+      EULA: "TRUE"
+      VERSION: "1.21.11"
+      TYPE: "VANILLA"
+      ONLINE_MODE: "FALSE"
+      ENABLE_RCON: "TRUE"
+      RCON_PASSWORD: "changeme"
+      ENABLE_ROLLING_LOGS: "TRUE"
+      MEMORY: "2G"
     ports:
-      - "3000-3003:3000-3003" # see the view from the camera mounted on your bot head: http://localhost:3000/
-      - 8080 # Mindserver port
-    extra_hosts:
-    - "host.docker.internal:host-gateway"
-
-  viaproxy: #use this service to connect to an unsupported minecraft server versions. more info: ./services/viaproxy/README.md
-    image: ghcr.io/viaversion/viaproxy:latest
+      - "25565:25565"
+      - "25575:25575"
     volumes:
-      - ./services/viaproxy:/app/run
-    ports:
-      - "25568:25568"
-    profiles:
-      - viaproxy
-    stdin_open: true
-    tty: true
+      - ./mc-data:/data

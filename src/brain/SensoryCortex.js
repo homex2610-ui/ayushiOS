@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { THRESHOLDS } from './config.js';
+import { SpatialVision } from './SpatialVision.js';
 
 const HOSTILE_MOBS = ['creeper', 'zombie', 'skeleton', 'spider', 'enderman',
                        'witch', 'drowned', 'phantom', 'pillager', 'husk'];
@@ -16,11 +17,27 @@ export class SensoryCortex {
   constructor(bot, bus) {
     this.bot = bot;
     this.bus = bus;
+    this.vision = new SpatialVision(bot);   // real eyes: spatial block/entity scan
     this.recentChat = []; // auditory short buffer
+  }
+
+  /**
+   * Auditory input — call from chat handlers so snapshots carry what the bot
+   * overheard. Without this feed, recentChat stays empty forever.
+   */
+  hearChat(username, message) {
+    if (!username || !message) return;
+    const now = Date.now();
+    this.recentChat.push({ username, message, time: now });
+    this.recentChat = this.recentChat.filter(c => now - c.time < 60000).slice(-20);
+    this.bus.emit('heard_speech', { username, message });
   }
 
   getSnapshot() {
     const time = this.bot.time;
+    // entity is briefly null/invalid across respawn, death and kick windows —
+    // callers must tolerate a null snapshot rather than throwing every tick.
+    if (!this.bot.entity?.position) return null;
     const pos = this.bot.entity.position;
 
     // --- Threats (amygdala's raw material) ---
@@ -132,7 +149,28 @@ export class SensoryCortex {
       social: { nearbyPlayers },
       body: { inventory, equipped },
       recentChat: [...this.recentChat],
+      spatial: null,
     };
+
+    // Spatial vision — where things are (trees, ores, hostiles, water, loot)
+    try {
+      const scan = this.vision.scan();
+      if (scan && !scan.empty) {
+        snapshot.spatial = {
+          trees: scan.trees || [],
+          ores: scan.ores || [],
+          hostileCount: scan.hostileCount || 0,
+          nearestHostile: scan.nearestHostile || null,
+          waterDir: scan.waterDir,
+          waterDist: scan.waterDist,
+          lavaNear: scan.lavaNear || false,
+          workstations: scan.workstations || [],
+          animals: scan.animals || [],
+          loot: scan.loot || [],
+          nearestAnimal: scan.nearestAnimal || null,
+        };
+      }
+    } catch (_) {}
 
     this.bus.emit('perception', snapshot);
     return snapshot;

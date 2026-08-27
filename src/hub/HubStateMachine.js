@@ -40,6 +40,7 @@ export class HubStateMachine {
     this._stateTimeout = null;
     this._onComplete = null;
     this._onFail = null;
+    this._cancelled = false;
   }
 
   get currentState() { return this.state; }
@@ -47,10 +48,24 @@ export class HubStateMachine {
   onComplete(cb) { this._onComplete = cb; }
   onFail(cb) { this._onFail = cb; }
 
+  /**
+   * Abort an in-flight navigation. Callers that stop waiting on start()
+   * (e.g. a timeout race) MUST call this — otherwise the state machine keeps
+   * chatting server commands in the background for minutes.
+   */
+  cancel(reason = 'cancelled') {
+    if (this._cancelled) return;
+    this._cancelled = true;
+    this.navigator.abort();
+    console.warn(`[HubStateMachine] Navigation cancelled: ${reason}`);
+    this._clearNavFlag();
+  }
+
   async start(targetMode = 'survival') {
     this.targetMode = targetMode;
     this.retryCount = 0;
     this.stateHistory = [];
+    this._cancelled = false;
 
     if (this.bot) this.bot._navigationInProgress = true;
 
@@ -80,6 +95,11 @@ export class HubStateMachine {
     this.stateStartTime = Date.now();
 
     while (this.state !== HubStates.SURVIVAL && this.state !== HubStates.FAILED) {
+      if (this._cancelled) {
+        console.warn(`[HubStateMachine] Cancelled in state ${this.state} — aborting run loop`);
+        this.state = HubStates.FAILED;
+        break;
+      }
       if (this.retryCount > MAX_RETRIES) {
         console.error(`[HubStateMachine] Max retries (${MAX_RETRIES}) exceeded`);
         this.state = HubStates.FAILED;
@@ -292,6 +312,7 @@ export class HubStateMachine {
     this.retryCount = 0;
     this.targetMode = null;
     this.stateHistory = [];
+    this._cancelled = false;
     this.hotbarManager = new HubHotbarManager(this.bot);
     this.guiClient = new HubGUIClient(this.bot);
   }

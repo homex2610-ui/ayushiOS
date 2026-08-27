@@ -1,0 +1,17 @@
+{
+  "memory": "Got stuck and couldn't get unstuck | Got stuck and couldn't get unstuck | (AUTO MESSAGE)Your previous action 'mode:self_defense' was interrupted by unstuck. Your behavior log: I'm stuck!\n\nRespond accordingly.",
+  "turns": [
+    {
+      "role": "system",
+      "content": "Got stuck and couldn't get unstuck"
+    },
+    {
+      "role": "system",
+      "content": "Got stuck and couldn't get unstuck"
+    }
+  ],
+  "self_prompting_state": 0,
+  "self_prompt": null,
+  "taskStart": 1784286188346,
+  "last_sender": "updesh"
+}

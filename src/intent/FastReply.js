@@ -66,7 +66,7 @@ export class FastReply {
     set enabled(v) { this._enabled = v; }
 
     async simulateTypingDelay() {
-        const delay = 200 + Math.random() * 600;
+        const delay = 400 + Math.random() * 700;
         await new Promise(r => setTimeout(r, delay));
     }
 

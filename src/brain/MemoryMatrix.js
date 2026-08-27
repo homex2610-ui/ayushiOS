@@ -1,4 +1,3 @@
-/* global process */
 // MemoryMatrix.js
 // ─────────────────────────────────────────────────────────────
 // THE HIPPOCAMPUS
@@ -86,14 +85,64 @@ export class MemoryMatrix {
         const disk = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
         this.longTerm = this._mergeMemory(this.longTerm, disk);
       } catch (e) {
+        // Corrupt file (often truncated by a mid-write crash): preserve it
+        // for inspection instead of silently overwriting with defaults.
         console.error('[Memory] Error loading memory:', e);
+        try {
+          const backup = `${this.filePath}.corrupt-${Date.now()}`;
+          fs.copyFileSync(this.filePath, backup);
+          console.error(`[Memory] Corrupt memory preserved at ${backup}`);
+        } catch (_) { /* best-effort preservation */ }
+      }
+    }
+  }
+
+  /**
+   * worldGraph grows on every waypoint/NPC/hazard observation. Prune the
+   * stalest unreferenced data so the file can't balloon unbounded.
+   */
+  _pruneWorldGraph() {
+    const g = this.longTerm.semantic.worldGraph;
+    const MAX_EDGES = 2000;
+    const MAX_NODES = 1200;
+
+    if (g.edges.length > MAX_EDGES) {
+      const ts = e => e.lastTraversed || e.lastSeen || 0;
+      g.edges.sort((a, b) => ts(b) - ts(a));
+      g.edges.length = MAX_EDGES;
+    }
+
+    const nodeCount = Object.keys(g.nodes).length;
+    if (nodeCount > MAX_NODES) {
+      const referenced = new Set();
+      for (const e of g.edges) { referenced.add(e.fromId); referenced.add(e.toId); }
+      const isProtected = n =>
+        n.tags?.includes('safe') || n.tags?.includes('bed') || (n.importance ?? 0) >= 3;
+      const droppable = Object.values(g.nodes)
+        .filter(n => !referenced.has(n.id) && !isProtected(n))
+        .sort((a, b) => (a.lastSeen || 0) - (b.lastSeen || 0));
+      let excess = nodeCount - MAX_NODES;
+      for (const n of droppable) {
+        if (excess <= 0) break;
+        delete g.nodes[n.id];
+        if (this.longTerm.semantic.waypoints) delete this.longTerm.semantic.waypoints[n.id];
+        excess--;
       }
     }
   }
 
   save() {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(this.longTerm, null, 2));
+    // Atomic write: crash mid-save must never truncate memory.json — that
+    // used to wipe ALL long-term memory on next boot.
+    try {
+      this._pruneWorldGraph();
+      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+      const tmp = `${this.filePath}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.longTerm, null, 2));
+      fs.renameSync(tmp, this.filePath);
+    } catch (e) {
+      console.error('[Memory] Error saving memory:', e?.message || e);
+    }
   }
 
   // ---- Working memory ----
@@ -681,10 +730,36 @@ export class MemoryMatrix {
     return hazard;
   }
 
+  /**
+   * Mark nearby hazards as just-avoided so they stop re-triggering
+   * avoid_hazard every cooldown cycle. Re-armed after AVOID_REARM_MS.
+   */
+  markHazardsAvoided(position, maxDistance = 30) {
+    if (!position) return 0;
+    const normalized = this._normalizePosition(position);
+    const now = Date.now();
+    let count = 0;
+    for (const h of this.longTerm.semantic.hazards) {
+      const distance = Math.sqrt(
+        (normalized.x - h.position.x) ** 2 +
+        (normalized.y - h.position.y) ** 2 +
+        (normalized.z - h.position.z) ** 2
+      );
+      if (distance <= maxDistance + (h.radius || 0)) {
+        h.lastAvoided = now;
+        count++;
+      }
+    }
+    return count;
+  }
+
   getHazardsNear(position, maxDistance = 20) {
     if (!position) return [];
     const normalized = this._normalizePosition(position);
+    const now = Date.now();
+    const AVOID_REARM_MS = 60000; // hazard stays "handled" this long after avoiding it
     return this.longTerm.semantic.hazards.filter(h => {
+      if (h.lastAvoided && now - h.lastAvoided < AVOID_REARM_MS) return false;
       const distance = Math.sqrt(
         (normalized.x - h.position.x) ** 2 +
         (normalized.y - h.position.y) ** 2 +

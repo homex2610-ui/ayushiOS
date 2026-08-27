@@ -21,24 +21,6 @@ const INTERESTING_BLOCKS = {
     'lodestone': { type: 'navigation', priority: 6 },
 };
 
-const STRUCTURE_TYPES = [
-    { re: /village/i, type: 'village' },
-    { re: /pillager/i, type: 'outpost' },
-    { re: /temple|pyramid|desert|jungle/i, type: 'temple' },
-    { re: /mansion|woodland/i, type: 'mansion' },
-    { re: /stronghold/i, type: 'stronghold' },
-    { re: /fortress|nether_fortress/i, type: 'fortress' },
-    { re: /bastion/i, type: 'bastion' },
-    { re: /ancient.city|ancient_city/i, type: 'ancient_city' },
-    { re: /end.city|end_city|endcity/i, type: 'end_city' },
-    { re: /ruin|ocean_ruin/i, type: 'ruin' },
-    { re: /shipwreck/i, type: 'shipwreck' },
-    { re: /monument|ocean_monument/i, type: 'monument' },
-    { re: /mineshaft|abandoned/i, type: 'mineshaft' },
-    { re: /igloo/i, type: 'igloo' },
-    { re: /portal/i, type: 'portal_ruin' },
-];
-
 function v(p) {
     if (!p || typeof p.floored === 'function') return p;
     return new Vec3(p.x, p.y, p.z);

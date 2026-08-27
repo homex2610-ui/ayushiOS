@@ -100,7 +100,7 @@ export class TaskItem {
         task.createdAt = data.createdAt;
         task.completedAt = data.completedAt;
         task.error = data.error;
-        task.resumed = true;
+        task.resumed = data.resumed ?? false;
         task.resumeCount = data.resumeCount || 0;
         task.metadata = data.metadata || {};
         return task;

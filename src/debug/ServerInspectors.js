@@ -58,7 +58,7 @@ export function dumpHotbar(bot) {
   for (let i = 0; i < 9; i++) {
     const invSlot = 36 + i;
     const item = bot.inventory.slots[invSlot];
-    const indicator = bot.quickbarSlot === i ? ' ->' : '   ';
+    const indicator = bot.quickBarSlot === i ? ' ->' : '   ';
     if (item) {
       const lore = item.nbt ? extractLore(item.nbt) : null;
       console.log(`${indicator} Hotbar #${i} (Slot ${invSlot}): ${item.displayName} (${item.name}) x${item.count}`);
@@ -74,35 +74,25 @@ export function dumpHotbar(bot) {
 
 export function dumpScoreboard(bot) {
   console.log('\n=== [DEBUG: SCOREBOARD] ===');
-  const sb = bot.scoreboard;
-  if (!sb) {
+  const positions = bot.scoreboard;
+  if (!positions || typeof positions !== 'object') {
     console.log('No active scoreboard.');
     return;
   }
-  if (sb.title) {
-    console.log(`Sidebar Title: "${resolveText(sb.title)}"`);
-  }
-  if (sb.items) {
-    const lines = Object.values(sb.items).filter(i => i);
-    lines.forEach(item => {
+  let printed = false;
+  for (const [posName, sb] of Object.entries(positions)) {
+    const title = resolveText(sb?.title);
+    const items = Array.isArray(sb?.items) ? sb.items.filter(Boolean) : [];
+    if (!title && items.length === 0) continue;
+    printed = true;
+    console.log(`[${posName}] "${title || 'untitled'}"`);
+    items.forEach(item => {
       const name = resolveText(item.displayName) || item.name || String(item);
-      console.log(`  - ${name}`);
+      console.log(`  ${name}: ${item.value ?? ''}`);
     });
   }
-  if (sb.sidebar) {
-    console.log(`Sidebar objective: "${resolveText(sb.sidebar.title) || 'untitled'}"`);
-    if (sb.sidebar.items) {
-      sb.sidebar.items.forEach(item => {
-        const name = resolveText(item.displayName) || item.name || String(item);
-        console.log(`  ${name}: ${item.value || ''}`);
-      });
-    }
-  }
-  if (sb.belowName) {
-    console.log(`BelowName: "${resolveText(sb.belowName.title) || 'untitled'}"`);
-  }
-  if (sb.player) {
-    console.log(`PlayerList objective present`);
+  if (!printed) {
+    console.log('No scoreboard data in any position.');
   }
   console.log('=============================\n');
 }

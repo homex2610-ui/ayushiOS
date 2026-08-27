@@ -1,0 +1,591 @@
+{
+  "avoid_hazard__go_surface": {
+    "id": "avoid_hazard__go_surface",
+    "goal": "avoid_hazard",
+    "primarySkill": "go_surface",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 1955,
+        "successes": 1955
+      }
+    },
+    "statistics": {
+      "attempts": 1955,
+      "successes": 1955,
+      "failures": 0,
+      "interruptions": 5,
+      "totalDuration": 1659138,
+      "totalReward": 285583,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 849,
+      "avgReward": 146,
+      "successRate": 1
+    },
+    "lastUsed": 1787682597535,
+    "confidence": 1
+  },
+  "avoid_hazard__move_to": {
+    "id": "avoid_hazard__move_to",
+    "goal": "avoid_hazard",
+    "primarySkill": "move_to",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 148,
+        "successes": 148
+      }
+    },
+    "statistics": {
+      "attempts": 148,
+      "successes": 148,
+      "failures": 0,
+      "interruptions": 0,
+      "totalDuration": 430,
+      "totalReward": 21906,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 3,
+      "avgReward": 148,
+      "successRate": 1
+    },
+    "lastUsed": 1784398616049,
+    "confidence": 1
+  },
+  "craft_gear__equip": {
+    "id": "craft_gear__equip",
+    "goal": "craft_gear",
+    "primarySkill": "equip",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 554,
+        "successes": 554
+      }
+    },
+    "statistics": {
+      "attempts": 554,
+      "successes": 554,
+      "failures": 0,
+      "interruptions": 0,
+      "totalDuration": 1429,
+      "totalReward": 82960,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 3,
+      "avgReward": 150,
+      "successRate": 1
+    },
+    "lastUsed": 1784401909637,
+    "confidence": 1
+  },
+  "explore_unknown__move_to": {
+    "id": "explore_unknown__move_to",
+    "goal": "explore_unknown",
+    "primarySkill": "move_to",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 209,
+        "successes": 201
+      }
+    },
+    "statistics": {
+      "attempts": 209,
+      "successes": 201,
+      "failures": 8,
+      "interruptions": 0,
+      "totalDuration": 1213349,
+      "totalReward": 29701,
+      "failureReasons": {
+        "Failed to reach 565, 78, 31 after 3 attempts": 1,
+        "Failed to reach 562, 80, 32 after 3 attempts": 1,
+        "Failed to reach 562, 79, 33 after 3 attempts": 1,
+        "Failed to reach 563, 77, 32 after 3 attempts": 2,
+        "Failed to reach 564, 71, 34 after 3 attempts": 1,
+        "Failed to reach 562, 70, 46 after 3 attempts": 1,
+        "Failed to reach -147, 61, -153 after 3 attempts": 1
+      }
+    },
+    "optimal": {
+      "avgDuration": 5805,
+      "avgReward": 142,
+      "successRate": 0.9617224880382775
+    },
+    "lastUsed": 1787630666253,
+    "confidence": 1
+  },
+  "eat__eat": {
+    "id": "eat__eat",
+    "goal": "eat",
+    "primarySkill": "eat",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 380,
+        "successes": 370
+      }
+    },
+    "statistics": {
+      "attempts": 380,
+      "successes": 370,
+      "failures": 10,
+      "interruptions": 0,
+      "totalDuration": 5690,
+      "totalReward": 53666,
+      "failureReasons": {
+        "No food in inventory": 10
+      }
+    },
+    "optimal": {
+      "avgDuration": 15,
+      "avgReward": 141,
+      "successRate": 0.9736842105263158
+    },
+    "lastUsed": 1787604853442,
+    "confidence": 1
+  },
+  "craft_gear__collect": {
+    "id": "craft_gear__collect",
+    "goal": "craft_gear",
+    "primarySkill": "collect",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 276,
+        "successes": 144
+      }
+    },
+    "statistics": {
+      "attempts": 276,
+      "successes": 144,
+      "failures": 132,
+      "interruptions": 2,
+      "totalDuration": 1819690,
+      "totalReward": 20110,
+      "failureReasons": {
+        "Missing resources to craft oak_planks. Need: oak_log: 1": 122,
+        "Missing resources to craft crafting_table. Need: oak_planks: 4": 7,
+        "m.pos.distanceTo is not a function": 1,
+        "No trees found — cannot make planks": 2
+      }
+    },
+    "optimal": {
+      "avgDuration": 6593,
+      "avgReward": 73,
+      "successRate": 0.5217391304347826
+    },
+    "lastUsed": 1787682375659,
+    "confidence": 1
+  },
+  "seek_safety__go_surface": {
+    "id": "seek_safety__go_surface",
+    "goal": "seek_safety",
+    "primarySkill": "go_surface",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 1879,
+        "successes": 1879
+      }
+    },
+    "statistics": {
+      "attempts": 1879,
+      "successes": 1879,
+      "failures": 0,
+      "interruptions": 6,
+      "totalDuration": 620506,
+      "totalReward": 272169,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 330,
+      "avgReward": 145,
+      "successRate": 1
+    },
+    "lastUsed": 1787683312052,
+    "confidence": 1
+  },
+  "chat_greet__eat": {
+    "id": "chat_greet__eat",
+    "goal": "chat_greet",
+    "primarySkill": "eat",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 17,
+        "successes": 17
+      }
+    },
+    "statistics": {
+      "attempts": 17,
+      "successes": 17,
+      "failures": 0,
+      "interruptions": 0,
+      "totalDuration": 13,
+      "totalReward": 2550,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 1,
+      "avgReward": 150,
+      "successRate": 1
+    },
+    "lastUsed": 1784402403197,
+    "confidence": 1
+  },
+  "build_base__collect": {
+    "id": "build_base__collect",
+    "goal": "build_base",
+    "primarySkill": "collect",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 207,
+        "successes": 163
+      }
+    },
+    "statistics": {
+      "attempts": 207,
+      "successes": 163,
+      "failures": 44,
+      "interruptions": 9,
+      "totalDuration": 5196696,
+      "totalReward": 22885,
+      "failureReasons": {
+        "Cannot read properties of null (reading 'x')": 3,
+        "Missing resources to craft oak_planks. Need: oak_log: 1": 16,
+        "No known recipe for bed.": 1,
+        "No trees found — cannot make planks": 15,
+        "m.pos.distanceTo is not a function": 6,
+        "Missing resources to craft bed. Need: red_wool: 3": 3
+      }
+    },
+    "optimal": {
+      "avgDuration": 25105,
+      "avgReward": 111,
+      "successRate": 0.7874396135265701
+    },
+    "lastUsed": 1787683323410,
+    "confidence": 1
+  },
+  "eat__interact": {
+    "id": "eat__interact",
+    "goal": "eat",
+    "primarySkill": "interact",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 63,
+        "successes": 63
+      }
+    },
+    "statistics": {
+      "attempts": 63,
+      "successes": 63,
+      "failures": 0,
+      "interruptions": 0,
+      "totalDuration": 48,
+      "totalReward": 8938,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 1,
+      "avgReward": 142,
+      "successRate": 1
+    },
+    "lastUsed": 1784403323816,
+    "confidence": 1
+  },
+  "eat__collect": {
+    "id": "eat__collect",
+    "goal": "eat",
+    "primarySkill": "collect",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 99,
+        "successes": 96
+      }
+    },
+    "statistics": {
+      "attempts": 99,
+      "successes": 96,
+      "failures": 3,
+      "interruptions": 0,
+      "totalDuration": 59893,
+      "totalReward": 14200,
+      "failureReasons": {
+        "No food in inventory": 3
+      }
+    },
+    "optimal": {
+      "avgDuration": 605,
+      "avgReward": 143,
+      "successRate": 0.9696969696969697
+    },
+    "lastUsed": 1784462494187,
+    "confidence": 1
+  },
+  "chat_greet__chat": {
+    "id": "chat_greet__chat",
+    "goal": "chat_greet",
+    "primarySkill": "chat",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 364,
+        "successes": 364
+      }
+    },
+    "statistics": {
+      "attempts": 364,
+      "successes": 364,
+      "failures": 0,
+      "interruptions": 0,
+      "totalDuration": 639,
+      "totalReward": 52189,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 2,
+      "avgReward": 143,
+      "successRate": 1
+    },
+    "lastUsed": 1787680732476,
+    "confidence": 1
+  },
+  "emergency_retreat__go_surface": {
+    "id": "emergency_retreat__go_surface",
+    "goal": "emergency_retreat",
+    "primarySkill": "go_surface",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 14,
+        "successes": 14
+      }
+    },
+    "statistics": {
+      "attempts": 14,
+      "successes": 14,
+      "failures": 0,
+      "interruptions": 8,
+      "totalDuration": 34577,
+      "totalReward": 1729,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 2470,
+      "avgReward": 124,
+      "successRate": 1
+    },
+    "lastUsed": 1784452947070,
+    "confidence": 1
+  },
+  "eat__combat": {
+    "id": "eat__combat",
+    "goal": "eat",
+    "primarySkill": "combat",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 205,
+        "successes": 68
+      }
+    },
+    "statistics": {
+      "attempts": 205,
+      "successes": 68,
+      "failures": 137,
+      "interruptions": 0,
+      "totalDuration": 2014138,
+      "totalReward": 7335,
+      "failureReasons": {
+        "No food in inventory": 129,
+        "Combat aborted: health 2.5 below threshold 3": 1,
+        "Combat aborted: health 1 below threshold 3": 2,
+        "Combat aborted: health 2.410721778869629 below threshold 3": 1,
+        "Combat aborted: health 1.1666679382324219 below threshold 3": 2,
+        "Combat aborted: health 2.333333969116211 below threshold 3": 1,
+        "Combat aborted: health 0 below threshold 3": 1
+      }
+    },
+    "optimal": {
+      "avgDuration": 9825,
+      "avgReward": 36,
+      "successRate": 0.33170731707317075
+    },
+    "lastUsed": 1787682708662,
+    "confidence": 1
+  },
+  "advance_capability__collect": {
+    "id": "advance_capability__collect",
+    "goal": "advance_capability",
+    "primarySkill": "collect",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 324,
+        "successes": 0
+      }
+    },
+    "statistics": {
+      "attempts": 324,
+      "successes": 0,
+      "failures": 324,
+      "interruptions": 0,
+      "totalDuration": 2341683,
+      "totalReward": -3540,
+      "failureReasons": {
+        "Missing resources to craft oak_planks. Need: oak_log: 1": 292,
+        "Failed to craft wooden_pickaxe — recipe API unavailable (have ingredients but cannot craft).": 1,
+        "Missing resources to craft crafting_table. Need: oak_planks: 4": 4,
+        "No trees found — cannot make planks": 21,
+        "m.pos.distanceTo is not a function": 5,
+        "Missing resources to craft stick. Need: oak_planks: 2": 1
+      }
+    },
+    "optimal": {
+      "avgDuration": 7227,
+      "avgReward": -11,
+      "successRate": 0
+    },
+    "lastUsed": 1787683455779,
+    "confidence": 1
+  },
+  "explore_wander__explore": {
+    "id": "explore_wander__explore",
+    "goal": "explore_wander",
+    "primarySkill": "explore",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 136,
+        "successes": 136
+      }
+    },
+    "statistics": {
+      "attempts": 136,
+      "successes": 136,
+      "failures": 0,
+      "interruptions": 0,
+      "totalDuration": 1152923,
+      "totalReward": 19606,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 8477,
+      "avgReward": 144,
+      "successRate": 1
+    },
+    "lastUsed": 1787683457678,
+    "confidence": 1
+  },
+  "craft_gear__craft": {
+    "id": "craft_gear__craft",
+    "goal": "craft_gear",
+    "primarySkill": "craft",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 21,
+        "successes": 2
+      }
+    },
+    "statistics": {
+      "attempts": 21,
+      "successes": 2,
+      "failures": 19,
+      "interruptions": 0,
+      "totalDuration": 68351,
+      "totalReward": -664,
+      "failureReasons": {
+        "Failed to craft wooden_pickaxe — recipe API unavailable (have ingredients but cannot craft).": 4,
+        "Failed to craft crafting_table — recipe API unavailable (have ingredients but cannot craft).": 11,
+        "Failed to craft wooden_pickaxe — have ingredients but cannot craft (need a crafting table nearby?).": 4
+      }
+    },
+    "optimal": {
+      "avgDuration": 3255,
+      "avgReward": -32,
+      "successRate": 0.09523809523809523
+    },
+    "lastUsed": 1787679960067,
+    "confidence": 1
+  },
+  "advance_capability__craft": {
+    "id": "advance_capability__craft",
+    "goal": "advance_capability",
+    "primarySkill": "craft",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 6,
+        "successes": 2
+      }
+    },
+    "statistics": {
+      "attempts": 6,
+      "successes": 2,
+      "failures": 4,
+      "interruptions": 0,
+      "totalDuration": 15895,
+      "totalReward": 86,
+      "failureReasons": {
+        "Failed to craft wooden_pickaxe — recipe API unavailable (have ingredients but cannot craft).": 1,
+        "Failed to craft wooden_pickaxe — have ingredients but cannot craft (need a crafting table nearby?).": 2,
+        "Failed to craft wooden_axe — have ingredients but cannot craft (need a crafting table nearby?).": 1
+      }
+    },
+    "optimal": {
+      "avgDuration": 2649,
+      "avgReward": 14,
+      "successRate": 0.3333333333333333
+    },
+    "lastUsed": 1787680026333,
+    "confidence": 0.6000000000000001
+  },
+  "farm_food__farm": {
+    "id": "farm_food__farm",
+    "goal": "farm_food",
+    "primarySkill": "farm",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 9,
+        "successes": 9
+      }
+    },
+    "statistics": {
+      "attempts": 9,
+      "successes": 9,
+      "failures": 0,
+      "interruptions": 0,
+      "totalDuration": 325740,
+      "totalReward": 1228,
+      "failureReasons": {}
+    },
+    "optimal": {
+      "avgDuration": 36193,
+      "avgReward": 136,
+      "successRate": 1
+    },
+    "lastUsed": 1787679480812,
+    "confidence": 0.75
+  },
+  "advance_capability__craft_planks": {
+    "id": "advance_capability__craft_planks",
+    "goal": "advance_capability",
+    "primarySkill": "craft_planks",
+    "serverTypes": {
+      "unknown": {
+        "attempts": 1,
+        "successes": 0
+      }
+    },
+    "statistics": {
+      "attempts": 1,
+      "successes": 0,
+      "failures": 1,
+      "interruptions": 0,
+      "totalDuration": 3270,
+      "totalReward": -50,
+      "failureReasons": {
+        "Failed to craft wooden_pickaxe — have ingredients but cannot craft (need a crafting table nearby?).": 1
+      }
+    },
+    "optimal": {
+      "avgDuration": 3270,
+      "avgReward": -50,
+      "successRate": 0
+    },
+    "lastUsed": 1787679675095,
+    "confidence": 0.35
+  }
+}

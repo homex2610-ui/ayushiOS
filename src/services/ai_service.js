@@ -51,39 +51,11 @@ export class AIService {
     }
 
     async sendRequest(turns, systemMessage) {
-        const startTime = Date.now();
-        const primary = this.providerManager.getPrimary();
-
-        try {
-            const result = await this.modelRouter.sendRequest(turns, systemMessage);
-            if (primary) {
-                this.metrics.recordSuccess(primary.api, primary.model, Date.now() - startTime);
-            }
-            return result;
-        } catch (err) {
-            if (primary) {
-                this.metrics.recordFailure(primary.api, primary.model, err.message?.substring(0, 50) || 'unknown');
-            }
-            throw err;
-        }
+        return await this.modelRouter.sendRequest(turns, systemMessage);
     }
 
     async sendVisionRequest(messages, systemMessage, imageBuffer) {
-        const startTime = Date.now();
-        const primary = this.providerManager.getPrimary();
-
-        try {
-            const result = await this.modelRouter.sendVisionRequest(messages, systemMessage, imageBuffer);
-            if (primary) {
-                this.metrics.recordSuccess(primary.api, primary.model, Date.now() - startTime);
-            }
-            return result;
-        } catch (err) {
-            if (primary) {
-                this.metrics.recordFailure(primary.api, primary.model, err.message?.substring(0, 50) || 'unknown');
-            }
-            throw err;
-        }
+        return await this.modelRouter.sendVisionRequest(messages, systemMessage, imageBuffer);
     }
 
     async embed(text) {

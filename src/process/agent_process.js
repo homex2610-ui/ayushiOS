@@ -17,6 +17,11 @@ export class AgentProcess {
     start(load_memory=false, init_message=null, count_id=0, serverSettings={}) {
         this.count_id = count_id;
         this.running = true;
+        this._spawnedAt = Date.now();
+        // Persist resolved connection target so auto-restarts reconnect to the
+        // same server instead of falling back to raw settings.js values.
+        if (Object.keys(serverSettings).length > 0) this._serverSettings = serverSettings;
+        serverSettings = this._serverSettings || serverSettings;
 
         let args = [init_agent_path, this.name];
         args.push('-n', this.name);
@@ -43,6 +48,11 @@ export class AgentProcess {
 
             if (this._exiting) return;
 
+            // Healthy uptime resets the crash budget, so crashes spread over
+            // a long-lived session can't permanently retire the agent.
+            const uptime = Date.now() - (this._spawnedAt || Date.now());
+            if (uptime > 5 * 60 * 1000) this._restartCount = 0;
+
             if (code > 1) {
                 console.log(`Ending task`);
                 process.exit(code);
@@ -55,12 +65,14 @@ export class AgentProcess {
                     process.exit(1);
                     return;
                 }
-                if (Date.now() - this._lastRestart < 10000) {
-                    console.error(`Agent process exited too quickly and will not be restarted.`);
-                    return;
-                }
+                // Crash-looping: back off hard and retry anyway. A bare return
+                // here used to strand the stack — no retry was ever scheduled,
+                // and the live parent made the outer watchdog look unnecessary.
+                const crashedFast = Date.now() - this._lastRestart < 10000;
                 this._lastRestart = Date.now();
-                const reconnectDelay = Math.min(1000 + this._restartCount * 2000, 30000) + Math.random() * 3000;
+                const reconnectDelay = crashedFast
+                    ? 30000 + Math.random() * 10000
+                    : Math.min(1000 + this._restartCount * 2000, 30000) + Math.random() * 3000;
                 console.log(`Restart #${this._restartCount} — waiting ${(reconnectDelay/1000).toFixed(1)}s before reconnecting...`);
                 setTimeout(() => {
                     if (!this._exiting) {

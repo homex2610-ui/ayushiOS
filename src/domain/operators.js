@@ -44,6 +44,15 @@ export const OPERATORS = {
     params: { item: null, count: 1 },
   },
 
+  CraftPlanks: {
+    id: 'CraftPlanks',
+    description: 'Convert ANY held wood (log/wood/stem/hyphae) into its planks — species-agnostic',
+    preconditions: ['hasItem'],
+    effects: ['hasPlanks'],
+    btSkills: ['craft_planks'],
+    params: { count: 8 },
+  },
+
   Smelt: {
     id: 'Smelt',
     description: 'Smelt an item in a furnace',

@@ -35,7 +35,7 @@ export class ServerCapabilities {
       this._capabilities.canAttack = false;
     }
 
-    this._capabilities.hasScoreboard = !!this.bot.scoreboard?.title;
+    this._capabilities.hasScoreboard = !!this.bot.scoreboard?.sidebar?.title;
     this._capabilities.hasBossBar = !!this.bot.bossBars && Object.keys(this.bot.bossBars).length > 0;
 
     const items = this.bot.inventory?.items() || [];

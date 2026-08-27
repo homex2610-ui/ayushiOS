@@ -113,11 +113,13 @@ export function setupAuthHandler(bot, username) {
             }
             bot.chat(`/register ${authData.password} ${authData.password}`);
             setTimeout(() => {
+                // Fire late enough that `Date.now() - lastAuthAttempt >= 5000`
+                // can actually be true when the timer runs.
                 if (!authenticated && Date.now() - lastAuthAttempt >= 5000) {
                     bot.chat(`/login ${authData.password}`);
                     console.log('[AuthHandler] Register may have failed, trying /login instead...');
                 }
-            }, 3000);
+            }, 5500);
             console.log('[AuthHandler] Detected registration prompt. Sent /register...');
         } else if (loginPatterns.some(p => msg.includes(p))) {
             lastAuthAttempt = now;

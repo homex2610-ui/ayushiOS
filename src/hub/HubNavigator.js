@@ -28,6 +28,11 @@ const MODE_COMMANDS = {
   minigame: ['/server minigame', '/minigame', '/parkour', '/event'],
 };
 
+// Known per-server mode-transfer commands — add hosts here (host -> { command: '<cmd with {mode}>', available: [modes] }) to enable the fallback loop.
+const SERVERS_WITH_KNOWN_COMMANDS = {
+  // host substring keys -> available mode-transfer commands
+};
+
 export class HubNavigator {
   constructor(bot, agent, hotbarManager, guiClient) {
     this.bot = bot;
@@ -43,6 +48,12 @@ export class HubNavigator {
     this._lastGuiTitle = null;
     this._lastGameMode = null;
     this._lastDimension = null;
+    this._aborted = false;
+  }
+
+  /** Set by HubStateMachine.cancel() — long loops poll this and bail out. */
+  abort() {
+    this._aborted = true;
   }
 
   getModeCommands(targetMode) {
@@ -64,6 +75,7 @@ export class HubNavigator {
 
     const seen = new Set();
     for (const cmd of commands) {
+      if (this._aborted) return false;
       if (seen.has(cmd)) continue;
       seen.add(cmd);
 
@@ -75,6 +87,7 @@ export class HubNavigator {
         // Wait and poll for transfer every 2s up to 15s
         for (let w = 0; w < 8; w++) {
           await new Promise(r => setTimeout(r, 2000));
+          if (this._aborted) return false;
           if (await this.verifyTransfer()) return true;
         }
       } catch (e) {
@@ -87,6 +100,7 @@ export class HubNavigator {
       const known = SERVERS_WITH_KNOWN_COMMANDS[host];
       if (known) {
         for (const mode of known.available) {
+          if (this._aborted) return false;
           const cmd = known.command.replace('{mode}', mode);
           if (seen.has(cmd)) continue;
           seen.add(cmd);
@@ -96,6 +110,7 @@ export class HubNavigator {
             this.bot.chat(cmd);
             this._lastCommandTime = Date.now();
             await new Promise(r => setTimeout(r, 3000));
+            if (this._aborted) return false;
             if (await this.verifyTransfer()) return true;
           } catch (e) {
             console.warn(`[HubNavigator] Fallback ${cmd} error: ${e.message}`);
@@ -279,7 +294,7 @@ export class HubNavigator {
     this._lastDimension = dim;
 
     // 4) Scoreboard change
-    const title = this.bot.scoreboard?.title?.toLowerCase() || '';
+    const title = String(this.bot.scoreboard?.sidebar?.title || '').toLowerCase();
     if (title && this._lastScoreboard && title !== this._lastScoreboard) {
       console.log(`[HubNavigator] Scoreboard changed: "${this._lastScoreboard}" → "${title}"`);
       this._lastScoreboard = title;

@@ -63,6 +63,9 @@ export class CommandDiscovery {
         this.bot = bot;
         this.log = logger || ((...a) => {});
         this.serverIntel = serverIntel || null;
+        // Security: commands passively harvested from chat/help may only be
+        // auto-probed via bot.chat when whitelisted here (see executor gate).
+        this.SAFE_PROBE_COMMANDS = new Set(['help', 'list', 'motd', 'rules', 'ping', 'tps', 'balance', 'money']);
         this._queue = [];
         this._running = false;
         this._passive = false;
@@ -77,7 +80,7 @@ export class CommandDiscovery {
         this._cmdSentAt = 0;
     }
 
-    /** Observe-only: learn from chat/help text, never bot.chat probes. */
+    /** Passive mode: chat/help harvests are recorded to the KB but never probed unless whitelisted in SAFE_PROBE_COMMANDS. */
     setPassive(on) {
         this._passive = !!on;
         if (this._passive) {
@@ -85,6 +88,11 @@ export class CommandDiscovery {
             this._phase = 5;
             this._running = false;
             this.log('[CMD] Passive mode — observe only, no probing.');
+        } else {
+            // Reset discovery state so switching back to active mode can run a full pass.
+            this._queue = [];
+            this._phase = 0;
+            this._running = false;
         }
     }
 
@@ -189,9 +197,11 @@ export class CommandDiscovery {
             this._phase = 3;
         }
         if (this._queue.length === 0 && this._phase === 3) {
+            // Commands harvested from the KB (chat/help) are tagged so the executor
+            // below only ever runs ones whitelisted in SAFE_PROBE_COMMANDS.
             this._queue = Object.entries(this.kb.data.commands || {})
                 .filter(([k, v]) => !v.available && v.confidence >= 0.3)
-                .map(([k, v]) => ({ cmd: k, type: v.type || 'custom' }));
+                .map(([k, v]) => ({ cmd: k, type: v.type || 'custom', harvested: true }));
             this._phase = 4;
         }
         if (this._queue.length === 0) {
@@ -203,6 +213,17 @@ export class CommandDiscovery {
         const item = this._queue.shift();
         const key = item.cmd.split(' ')[0];
         if (this._discovered.has(key) || this._failed.has(key)) {
+            setTimeout(() => this._scheduleNext(), 100);
+            return;
+        }
+
+        // Security gate: a command harvested from chat is only ever sent via
+        // bot.chat if whitelisted in SAFE_PROBE_COMMANDS. Actively-confirmed
+        // commands (v.available === true) are unaffected — they never enter
+        // this queue because the phase-4 filter requires !v.available.
+        if (item.harvested && !this.SAFE_PROBE_COMMANDS.has(key.replace(/^\//, '').toLowerCase())) {
+            console.warn('[CommandDiscovery] Skipping unsafe probe: ' + item.cmd);
+            this._failed.add(key);
             setTimeout(() => this._scheduleNext(), 100);
             return;
         }

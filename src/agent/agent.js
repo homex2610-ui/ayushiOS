@@ -1,5 +1,7 @@
 import { History } from './history.js';
 import { Coder } from './coder.js';
+import { RuleBrain } from './rule_brain.js';
+import { DeterministicBrain } from './deterministic_brain.js';
 import { VisionInterpreter } from './vision/vision_interpreter.js';
 import { Prompter } from '../models/prompter.js';
 import { initModes } from './modes.js';
@@ -16,7 +18,10 @@ import { serverProxy, sendOutputToServer } from './mindserver_proxy.js';
 import settings from './settings.js';
 import { Task } from './tasks/tasks.js';
 import { speak } from './speak.js';
+import fs from 'fs';
+import path from 'path';
 import { log, validateNameFormat, handleDisconnection } from './connection_handler.js';
+import { PACE, humanPause } from './Pacing.js';
 import { WorldKnowledge } from './world_knowledge.js';
 import { ServerAnalyzer } from '../serverAnalyzer/ServerAnalyzer.js';
 import { HubMode } from '../hub/HubMode.js';
@@ -43,7 +48,7 @@ import { startIdleLookRoutine } from './Humanizer.js';
 import { AyushiOS } from '../brain/AyushiOS.js';
 import { TaskRunner } from './TaskRunner.js';
 import { EventBus } from '../core/EventBus.js';
-import { WorldState } from '../core/WorldState.js';
+// WorldState removed — redundant with SensoryCortex/WorldModel
 
 // Behavior Tree modules
 import { BTMemory } from './bt/memory.js';
@@ -64,7 +69,7 @@ export class Agent extends EventEmitter {
         this._pendingChats = [];
         this._loopRunning = false;
         this._loopTimeout = null;
-        this._lastHeartbeat = Date.now();
+        this._lastKeepAliveAck = Date.now();
         this._lastChatTime = 0;
         this.fastReply = new FastReply(this);
         this.taskQueue = null;
@@ -78,6 +83,21 @@ export class Agent extends EventEmitter {
         this.prompter = new Prompter(this, settings.profile);
         this.name = (this.prompter.getName() || '').trim();
         console.log(`Initializing agent ${this.name}...`);
+
+        // ═══ CONSOLE HOOK → VISION BOT ═══
+        // Pipe all console output to MindServer so the vision page sees it.
+        const _origLog = console.log.bind(console);
+        const _origWarn = console.warn.bind(console);
+        const _origError = console.error.bind(console);
+        const _sendLog = (args) => {
+            try {
+                const msg = args.map(a => (typeof a === 'string') ? a : JSON.stringify(a)).join(' ');
+                sendOutputToServer(this.name, msg);
+            } catch (_) {}
+        };
+        console.log = (...args) => { _origLog(...args); _sendLog(args); };
+        console.warn = (...args) => { _origWarn(...args); _sendLog(args); };
+        console.error = (...args) => { _origError(...args); _sendLog(args); };
         
         const nameCheck = validateNameFormat(this.name);
         if (!nameCheck.success) {
@@ -102,6 +122,8 @@ export class Agent extends EventEmitter {
         if (this.relationshipManager) this.memory_bank.setRelationshipManager(this.relationshipManager);
         this.memory_bank.restoreSubsystems(this);
         this.self_prompter = new SelfPrompter(this);
+        this.ruleBrain = new RuleBrain(this);   // zero-LLM deterministic brain
+        this.deterministicBrain = new DeterministicBrain(this);  // RiveScript + NLP + Markov
 
         // Behavior Tree subsystems
         this.btMemory = new BTMemory(this.name || 'ayushi');
@@ -136,7 +158,7 @@ export class Agent extends EventEmitter {
         this.bot = initBot(this.name);
 
         this.eventBus = new EventBus(this.bot);
-        this.worldState = new WorldState(this.bot);
+        // WorldState removed — redundant with SensoryCortex/WorldModel
 
         // Connection Handler
         const onDisconnect = (event, reason) => {
@@ -151,7 +173,17 @@ export class Agent extends EventEmitter {
 
             const navOnBot = this.bot && this.bot._navigationInProgress;
             if (navOnBot) {
-                console.log('[Agent] Disconnected during hub navigation — allowing reconnect for fallback.');
+                console.log('[Agent] Disconnected during hub navigation — grace period before forced restart.');
+                // Nothing reconnects in-process (ReconnectManager is dormant) and
+                // the outer supervisor only acts on process exit. Without this
+                // bound, a dead socket mid-hub-nav leaves a live zombie process.
+                if (!this._navGraceTimer) {
+                    this._navGraceTimer = setTimeout(() => {
+                        console.error('[Agent] Hub-nav disconnect grace expired — forcing exit for restart.');
+                        process.exit(1);
+                    }, 90000);
+                    this._navGraceTimer.unref?.();
+                }
                 return;
             }
 
@@ -168,11 +200,17 @@ export class Agent extends EventEmitter {
         // Bind events
         this.bot.once('kicked', (reason) => onDisconnect('Kicked', reason));
         this.bot.once('end', (reason) => onDisconnect('Disconnected', reason));
+        if (this.bot._client) {
+            this._onKeepAliveAck = () => { this._lastKeepAliveAck = Date.now(); };
+            this.bot._client.on('keep_alive', this._onKeepAliveAck);
+        }
         this.bot.on('error', (err) => {
-            if (String(err).includes('Duplicate') || String(err).includes('ECONNREFUSED')) {
+            const msg = String(err);
+            if (msg.includes('Duplicate') || msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET')) {
                  onDisconnect('Error', err);
             } else {
-                 log(this.name, `[LoginGuard] Connection Error: ${String(err)}`);
+                 log(this.name, `[LoginGuard] Connection Error: ${msg}`);
+                 if (err?.stack) console.error(err.stack.split('\n').slice(0, 8).join('\n'));
             }
         });
 
@@ -209,12 +247,40 @@ export class Agent extends EventEmitter {
 
                 this.worldKnowledge = new WorldKnowledge(this);
                 this.serverAnalyzer = new ServerAnalyzer(this);
+                // Persona proactive reactions (mood chatter, sunset/kill/diamond remarks)
+                try { this.deterministicBrain?.persona?.attach(this.bot); } catch (_) {}
                 const brainEnabled = settings.enable_brain !== false;
                 if (brainEnabled) {
                     this.serverAnalyzer.setPassiveCommandDiscovery(true);
                 }
                 this.serverAnalyzer.start();
                 this.btServerIntel.attach(this.bot);
+                // Pro inventory brain — sorting, triage, chest memory, gear care
+                try {
+                    const { InventoryManager } = await import('./inventory/InventoryManager.js');
+                    this.inventoryManager = new InventoryManager(this.bot, { username: this.name });
+                    this._invTimer = setInterval(() => {
+                        this._inventoryTick().catch(() => {});
+                    }, 8000);
+                    this._invTimer.unref?.();
+                } catch (e) {
+                    console.warn('[Agent] InventoryManager init failed:', e.message);
+                }
+
+                // ═══ KEEP-ALIVE: prevent server timeout ═══
+                // Pro player insight: servers kick idle connections.
+                // Jump every 30s to keep the connection alive and prevent timeout.
+                this._keepAliveTimer = setInterval(() => {
+                    try {
+                        if (this.bot?.entity && !this.bot.interrupt_code) {
+                            this.bot.setControlState('jump', true);
+                            setTimeout(() => {
+                                try { this.bot.setControlState('jump', false); } catch (_) {}
+                            }, 100);
+                        }
+                    } catch (_) {}
+                }, 30000);
+                this._keepAliveTimer.unref?.();
                 this.curiosityEngine = new CuriosityEngine(this);
                 if (settings.enable_curiosity !== false) {
                     this.curiosityEngine.start({ advisorMode: brainEnabled });
@@ -269,7 +335,6 @@ export class Agent extends EventEmitter {
                 if (this.taskQueue.resumeTasks(this)) {
                     console.log('[Agent] Resuming pending tasks...');
                 }
-                this.fastReply = new FastReply(this);
 
                 this._setupEventHandlers(save_data, init_message);
                 this.startEvents();
@@ -302,13 +367,11 @@ export class Agent extends EventEmitter {
                 });
 
                 const npcHub = hasModeNPCs && (gamemodeIsSurvival || stateIsSurvival);
-                // Position-based hub check: hub platform at y≈131, survival spawn at y≈99
-                const posY = this.bot.entity?.position?.y;
-                const atHubY = posY && posY > 120;
-                const alreadySurvival = !npcHub && !atHubY && (gamemodeIsSurvival || stateIsSurvival) && connectionManager.state !== 'hub';
+                // Already in survival if gamemode and state both say survival — skip hub join
+                const alreadySurvival = (gamemodeIsSurvival || stateIsSurvival) && connectionManager.state !== 'hub';
 
-                if (npcHub || (!alreadySurvival && settings.enable_brain !== false && this.bot?.entity)) {
-                    console.log(`[Agent] ${npcHub ? 'Hub NPCs detected' : 'Not in survival'} (gameMode=${this.bot?.game?.gameMode}, state=${connectionManager.state}). Attempting to join survival...`);
+                if (npcHub && !alreadySurvival) {
+                    console.log(`[Agent] Hub NPCs detected (gameMode=${this.bot?.game?.gameMode}, state=${connectionManager.state}). Attempting to join survival...`);
 
                     // Ensure we're authenticated before sending server commands
                     if (settings.auth !== 'offline' && settings.password) {
@@ -343,35 +406,8 @@ export class Agent extends EventEmitter {
                     console.log(`[Agent] Already in survival (gameMode=${this.bot?.game?.gameMode}, state=${connectionManager.state}) — proceeding directly`);
                 }
 
-                await new Promise((resolve) => setTimeout(resolve, 10000));
+                await new Promise((resolve) => setTimeout(resolve, 2000));
                 this.checkAllPlayersPresent();
-
-                // Walk away from spawn protection BEFORE brain boots
-                try {
-                    const p = this.bot.entity?.position;
-                    if (p) {
-                        console.log(`[Agent] At (${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)}). Trying to join survival via commands...`);
-                        const cmds = ['/survival', '/server survival', '/join survival', '/smp'];
-                        const origPos = { x: p.x, y: p.y, z: p.z };
-                        for (const cmd of cmds) {
-                            this.bot.chat(cmd);
-                            await new Promise(r => setTimeout(r, 4000));
-                            const cp = this.bot.entity?.position;
-                            if (cp) {
-                                const dx = cp.x - origPos.x;
-                                const dy = cp.y - origPos.y;
-                                const dz = cp.z - origPos.z;
-                                const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-                                if (dist > 3) {
-                                    console.log(`[Agent] Joined survival via "${cmd}" (moved ${Math.round(dist)}m)`);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.warn('[Agent] Spawn escape error:', e.message);
-                }
 
                 // [AyushiOS] Boot the brain after all systems are online
                 if (settings.enable_brain !== false) {
@@ -379,13 +415,14 @@ export class Agent extends EventEmitter {
                         this.taskRunner = new TaskRunner(this.bot);
                         this.brain = new AyushiOS(this.bot, this.taskRunner, {
                             serverAnalyzer: this.serverAnalyzer,
+                            connectionManager,
                         });
                         this.serverAnalyzer?.setPassiveCommandDiscovery?.(true);
                         this.curiosityEngine?.setAdvisorMode?.(true);
                         this.goalPlanner?.setAdvisorMode?.(true);
-                        // If a task queue is loaded, mark motor busy to prevent interference
+                        // If a task queue is loaded, pin motor busy to prevent interference
                         if (this.brain && this.brain.motor && settings._taskSteps?.length > 0) {
-                            this.brain.motor.isBusy = true;
+                            this.brain.motor.pinBusy('grind');
                         }
                         console.log('[AyushiOS] Brain booted — knowledge pipeline + advisors online.');
                     } catch (brainErr) {
@@ -396,8 +433,24 @@ export class Agent extends EventEmitter {
 
                 // Execute diamond_grind task steps via TaskRunner after brain boots
                 if (settings._taskSteps && Array.isArray(settings._taskSteps)) {
-                    const humanDelay = Math.floor(Math.random() * 5000) + 5000;
+                    const humanDelay = Math.floor(Math.random() * 1000) + 500;
                     console.log(`[Agent] Will execute ${settings._taskSteps.length} task steps after ${humanDelay}ms delay...`);
+
+                    // Track task file for progress persistence
+                    this._currentTaskFile = settings.auto_task_file || 'unknown';
+                    this._currentTotalSteps = settings._taskSteps.length;
+
+                    // Check for saved progress to resume after death
+                    const savedProgress = this._loadTaskProgress();
+                    let startStep = 0;
+                    if (savedProgress && savedProgress.taskFile === this._currentTaskFile && savedProgress.stepIndex > 0) {
+                        startStep = savedProgress.stepIndex;
+                        console.log(`[Agent] Resuming from step ${startStep} after death (saved ${Math.round((Date.now() - savedProgress.timestamp) / 1000)}s ago)`);
+                        // Clear the saved progress file now that we're resuming
+                        try {
+                            fs.unlinkSync(path.join('bots', this.name, 'task_progress.json'));
+                        } catch (_) {}
+                    }
 
                     const idleLook = startIdleLookRoutine(this.bot);
 
@@ -421,83 +474,552 @@ export class Agent extends EventEmitter {
 
                         console.log(`[Agent] Starting diamond grind: ${settings._taskSteps.length} steps`);
                         if (this.brain && this.brain.motor) {
-                            this.brain.motor.isBusy = true;
+                            this.brain.motor.pinBusy('grind');
                         }
 
-                        // Pre-grind: walk away from spawn if still near it
+                        // Pre-grind survival loop — Maslow-style priorities
+                        // Based on expert grinding research: shield first, then tools, then food
                         try {
                             const p = this.bot.entity?.position;
-                            if (p && Math.abs(p.x) + Math.abs(p.z) < 40) {
-                                console.log(`[Agent] Near spawn (${Math.round(p.x)}, ${Math.round(p.z)}), walking away to find resources...`);
-                                const walkSkill = this.taskRunner?.skills?.['move_to'];
-                                if (walkSkill) {
-                                    // Walk ~30 blocks in a random direction
-                                    const angle = Math.random() * 2 * Math.PI;
-                                    const walkX = Math.round(p.x + Math.cos(angle) * 30);
-                                    const walkZ = Math.round(p.z + Math.sin(angle) * 30);
-                                    await walkSkill({ x: walkX, z: walkZ, range: 5 });
-                                    console.log(`[Agent] Arrived at (${Math.round(this.bot.entity?.position?.x)}, ${Math.round(this.bot.entity?.position?.z)})`);
+                            const { isHostile } = await import('../utils/mcdata.js');
+                            const { eatBestFood, digUpToSurface } = await import('./library/skills.js');
+                            const walkSkill = this.taskRunner?.skills?.['move_to'];
+
+                            // ═══════════════════════════════════════════════════════════
+                            // PHASE 0: SURFACE CHECK — pro players NEVER stay underground
+                            // ═══════════════════════════════════════════════════════════
+                            // Check if we're underground (no sky visible above)
+                            try {
+                                const skyCheck = this.bot.blockAt(this.bot.entity.position.offset(0, 2, 0));
+                                const skyCheck2 = this.bot.blockAt(this.bot.entity.position.offset(0, 5, 0));
+                                const isUnderground = skyCheck && skyCheck.name !== 'air' && skyCheck2 && skyCheck2.name !== 'air';
+                                if (isUnderground) {
+                                    console.log(`[Agent] Underground at Y=${Math.round(p.y)} — digging to surface`);
+                                    const reached = await digUpToSurface(this.bot, 25);
+                                    if (reached) {
+                                        console.log(`[Agent] Reached surface at Y=${Math.round(this.bot.entity.position.y)}`);
+                                    } else {
+                                        console.log(`[Agent] Couldn't dig to surface — continuing anyway`);
+                                    }
                                 }
-                            } else {
-                                console.log(`[Agent] Already away from spawn (${Math.round(p?.x)}, ${Math.round(p?.z)}), proceeding with grind`);
+                            } catch (_) {}
+
+                            // ═══════════════════════════════════════════════════════════
+                            // PHASE 1: SURVIVAL — eat food, sleep if night, flee threats
+                            // ═══════════════════════════════════════════════════════════
+
+                            const healthCheck = () => (this.bot.health ?? 20) > 0 && this.bot.entity;
+                            const invItems = () => this.bot.inventory?.items() || [];
+
+                            // 1a) Eat any available food to regen health
+                            try {
+                                if (this.bot.food < 18) {
+                                    await eatBestFood(this.bot);
+                                    await new Promise(r => setTimeout(r, 500));
+                                }
+                            } catch (_) {}
+
+                            // 1b) EMERGENCY: If no food and low health, FLEE far from everything
+                            //     then hunt animals for food before doing anything else.
+                            const foodCount = invItems().filter(i => i.foodRecovery > 0).reduce((s,i) => s + i.count, 0);
+                            if (foodCount === 0 && (this.bot.health ?? 20) < 16) {
+                                console.log(`[Agent] No food + low health (${Math.round(this.bot.health)}) — fleeing to safety`);
+                                // Run 60 blocks away from nearest hostile
+                                const hostiles = Object.values(this.bot.entities || {})
+                                    .filter(e => e?.isValid && e.position && isHostile(e))
+                                    .map(e => ({ e, d: e.position.distanceTo(this.bot.entity.position) }))
+                                    .sort((a, b) => a.d - b.d);
+                                if (hostiles.length > 0 && hostiles[0].d < 20) {
+                                    const h = hostiles[0].e;
+                                    const dx = this.bot.entity.position.x - h.position.x;
+                                    const dz = this.bot.entity.position.z - h.position.z;
+                                    const len = Math.sqrt(dx*dx + dz*dz) || 1;
+                                    const fleeX = Math.round(this.bot.entity.position.x + (dx/len) * 60);
+                                    const fleeZ = Math.round(this.bot.entity.position.z + (dz/len) * 60);
+                                    this.bot.setControlState('sprint', true);
+                                    try {
+                                        await Promise.race([
+                                            walkSkill({ x: fleeX, y: Math.round(this.bot.entity.position.y), z: fleeZ, range: 5 }),
+                                            new Promise(r => setTimeout(r, 8000))
+                                        ]);
+                                    } catch (_) {}
+                                    this.bot.setControlState('sprint', false);
+                                    await new Promise(r => setTimeout(r, 1000));
+                                }
+                                // Try eating again after fleeing
+                                try { await eatBestFood(this.bot); } catch (_) {}
+                                // Hunt nearby animals for food
+                                const animals = Object.values(this.bot.entities || {})
+                                    .filter(e => e?.isValid && e.position && e.name && !isHostile(e) && e.position.distanceTo(this.bot.entity.position) < 16)
+                                    .sort((a, b) => a.position.distanceTo(this.bot.entity.position) - b.position.distanceTo(this.bot.entity.position));
+                                if (animals.length > 0) {
+                                    console.log(`[Agent] Hunting ${animals[0].name} for food`);
+                                    try {
+                                        const { collectBlock } = await import('./library/skills.js');
+                                        await this.bot.pathfinder.goto(new (await import('mineflayer-pathfinder')).GoalNear(
+                                            Math.round(animals[0].position.x), Math.round(animals[0].position.y), Math.round(animals[0].position.z), 2
+                                        ));
+                                        for (let i = 0; i < 5 && animals[0].isValid; i++) {
+                                            this.bot.attack(animals[0]);
+                                            await new Promise(r => setTimeout(r, 600));
+                                        }
+                                    } catch (_) {}
+                                    try { await eatBestFood(this.bot); } catch (_) {}
+                                }
+                            }
+
+                            // 1c) Try to sleep if nighttime — but NEVER if hostiles are nearby (pro player rule)
+                            try {
+                                const time = this.bot.time?.timeOfDay ?? 0;
+                                const isNight = time > 12541 && time < 23459;
+                                if (isNight) {
+                                    // Check for hostiles before sleeping — pillagers will kill us in bed
+                                    const nearbyHostiles = Object.values(this.bot.entities || {})
+                                        .filter(e => e?.isValid && e.position && isHostile(e))
+                                        .some(e => e.position.distanceTo(this.bot.entity.position) < 24);
+                                    if (nearbyHostiles) {
+                                        console.log(`[Agent] Nighttime but hostiles nearby — skipping sleep, sprinting to safety`);
+                                    } else {
+                                        const bed = this.bot.findBlock({ matching: [26, 355], maxDistance: 32 });
+                                        if (bed) {
+                                            console.log(`[Agent] Nighttime — trying to sleep at bed near (${bed.position.x}, ${bed.position.z})`);
+                                            try {
+                                                const { sprintJumpToward } = await import('./library/skills.js');
+                                                await sprintJumpToward(this.bot, bed.position, 2, 8000);
+                                            } catch (_) {}
+                                            try {
+                                                await this.bot.sleep(this.bot.blockAt(bed.position));
+                                                let sleepAttempts = 0;
+                                                while (this.bot.time?.timeOfDay > 12541 && this.bot.time?.timeOfDay < 23459 && this.bot.entity && sleepAttempts < 30) {
+                                                    await new Promise(r => setTimeout(r, 1000));
+                                                    sleepAttempts++;
+                                                }
+                                                try { this.bot.wakeUp(); } catch (_) {}
+                                                console.log(`[Agent] Morning! Safe to proceed.`);
+                                            } catch (e) {
+                                                console.log(`[Agent] Sleep failed: ${e.message} — continuing`);
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (_) {}
+
+                            // 1c*) Sprint away from hostiles — let CombatEngine reflex handle fighting
+                            if (p) {
+                                const threats = Object.values(this.bot.entities || {})
+                                    .filter(e => e?.isValid && e.position && isHostile(e))
+                                    .map(e => ({ e, d: e.position.distanceTo(this.bot.entity.position) }))
+                                    .filter(t => t.d < 24)
+                                    .sort((a, b) => a.d - b.d);
+                                if (threats.length > 0) {
+                                    const threat = threats[0];
+                                    const dx = this.bot.entity.position.x - threat.e.position.x;
+                                    const dz = this.bot.entity.position.z - threat.e.position.z;
+                                    const len = Math.sqrt(dx * dx + dz * dz) || 1;
+                                    const fleeX = Math.round(this.bot.entity.position.x + (dx / len) * 50);
+                                    const fleeZ = Math.round(this.bot.entity.position.z + (dz / len) * 50);
+                                    console.log(`[Agent] Fleeing ${threat.e.name} (dist ${Math.round(threat.d)}) → (${fleeX}, ${fleeZ})`);
+                                    try {
+                                        const { sprintJumpToward } = await import('./library/skills.js');
+                                        await sprintJumpToward(this.bot, { x: fleeX, y: Math.round(this.bot.entity.position.y), z: fleeZ }, 3, 8000);
+                                    } catch (_) {
+                                        this.bot.setControlState('sprint', true);
+                                        try {
+                                            await Promise.race([
+                                                walkSkill({ x: fleeX, y: Math.round(this.bot.entity.position.y), z: fleeZ, range: 3 }),
+                                                new Promise(r => setTimeout(r, 6000))
+                                            ]);
+                                        } catch (_) {}
+                                        this.bot.setControlState('sprint', false);
+                                    }
+                                    await new Promise(r => setTimeout(r, 200));
+                                }
+                            }
+
+                            // 1d) Eat again after combat to recover health
+                            try {
+                                if ((this.bot.health ?? 20) < 14) {
+                                    const hasFood = (this.bot.inventory?.items() || []).some(i => i.foodRecovery > 0);
+                                    if (hasFood) {
+                                        console.log(`[Agent] Low health (${Math.round(this.bot.health)}) — eating to recover`);
+                                        await eatBestFood(this.bot);
+                                    }
+                                }
+                            } catch (_) {}
+
+                            if (!healthCheck()) { console.log('[Agent] Bot died during survival phase'); return; }
+
+                            // ═══════════════════════════════════════════════════════════
+                            // PHASE 2: TOOLS — crafting table → planks → sword FIRST
+                            // ═══════════════════════════════════════════════════════════
+                            // Expert grinding research: weapon FIRST for survival,
+                            // then pickaxe. Crafting table required before anything else.
+
+                            const inv2 = this.bot.inventory?.items() || [];
+                            const logCount = inv2.filter(i => /_log$/.test(i.name)).reduce((s, i) => s + (i.count || 1), 0);
+                            const plankCount = inv2.filter(i => /_planks$/.test(i.name)).reduce((s, i) => s + (i.count || 1), 0);
+                            const hasTable = inv2.some(i => i.name === 'crafting_table') || this.bot.findBlock({ matching: 58, maxDistance: 4 }) !== null;
+                            const hasSword2 = inv2.some(i => /_sword/.test(i.name));
+                            const hasPickaxe2 = inv2.some(i => /_pickaxe/.test(i.name));
+
+                            // 2a) If no logs and no planks, gather wood (while fighting back)
+                            if (logCount === 0 && plankCount < 4) {
+                                console.log(`[Agent] No wood — gathering tree logs`);
+                                try {
+                                    const { collectBlock, sprintJumpToward } = await import('./library/skills.js');
+                                    const { isWoodBlockName } = await import('../utils/item_families.js');
+                                    // Find nearest tree at similar Y level first, then any
+                                    const botY = Math.round(this.bot.entity?.position?.y || 64);
+                                    let allTrees = this.bot.findBlocks({ matching: (b) => isWoodBlockName(b?.name), maxDistance: 48, count: 20 });
+                                    // PRO PLAYER RULE: never chase underground trees — they're unreachable
+                                    // Prefer trees within 10 Y levels of bot
+                                    let trees = allTrees.filter(p => Math.abs(p.y - botY) < 10);
+                                    if (trees.length === 0) {
+                                        // No reachable trees — sprint to explore and load new chunks
+                                        console.log(`[Agent] No reachable trees at Y=${botY} — exploring`);
+                                        const { sprintJumpToward } = await import('./library/skills.js');
+                                        const angle = Math.random() * 2 * Math.PI;
+                                        const rx = this.bot.entity.position.x + Math.cos(angle) * 40;
+                                        const rz = this.bot.entity.position.z + Math.sin(angle) * 40;
+                                        await sprintJumpToward(this.bot, { x: rx, y: botY, z: rz }, 5, 12000);
+                                        // Re-scan after exploring
+                                        allTrees = this.bot.findBlocks({ matching: (b) => isWoodBlockName(b?.name), maxDistance: 48, count: 20 });
+                                        trees = allTrees.filter(p => Math.abs(p.y - botY) < 10);
+                                        if (trees.length === 0) trees = allTrees.slice(0, 3); // last resort: try 3 closest
+                                    }
+                                    if (trees.length > 0) {
+                                        // Sort by 3D distance
+                                        trees.sort((a, b) => {
+                                            const da = a.distanceTo(this.bot.entity.position);
+                                            const db = b.distanceTo(this.bot.entity.position);
+                                            return da - db;
+                                        });
+                                        let chopped = false;
+                                        for (const treePos of trees.slice(0, 5)) {
+                                            console.log(`[Agent] Sprinting to tree at (${treePos.x}, ${treePos.y}, ${treePos.z})`);
+                                            // Use raw sprint-jump movement — no pathfinder
+                                            const arrived = await sprintJumpToward(this.bot, treePos, 3, 12000);
+                                            if (!arrived) {
+                                                console.log(`[Agent] Couldn't reach tree at (${treePos.x}, ${treePos.y}, ${treePos.z}) — trying next`);
+                                                continue;
+                                            }
+                                            try {
+                                                await collectBlock(this.bot, 'log', 8);
+                                                console.log(`[Agent] Chopped 8 logs`);
+                                                chopped = true;
+                                                break;
+                                            } catch (e) {
+                                                console.warn(`[Agent] Tree chop failed: ${e.message}`);
+                                            }
+                                        }
+                                        if (!chopped) {
+                                            console.warn(`[Agent] Could not chop any tree — moving to explore`);
+                                            // Sprint to random direction to load new chunks
+                                            const angle = Math.random() * 2 * Math.PI;
+                                            const rx = this.bot.entity.position.x + Math.cos(angle) * 30;
+                                            const rz = this.bot.entity.position.z + Math.sin(angle) * 30;
+                                            await sprintJumpToward(this.bot, { x: rx, y: this.bot.entity.position.y, z: rz }, 5, 10000);
+                                        }
+                                    } else {
+                                        console.log(`[Agent] No trees found — sprinting to explore`);
+                                        const angle = Math.random() * 2 * Math.PI;
+                                        const rx = this.bot.entity.position.x + Math.cos(angle) * 30;
+                                        const rz = this.bot.entity.position.z + Math.sin(angle) * 30;
+                                        await sprintJumpToward(this.bot, { x: rx, y: this.bot.entity.position.y, z: rz }, 5, 10000);
+                                    }
+                                } catch (e) { console.warn(`[Agent] Wood gathering failed: ${e.message}`); }
+                            }
+
+                            // 2b) Convert logs → planks (if we have logs but no planks)
+                            // Find which log type we have and craft matching planks
+                            const logCount2 = (this.bot.inventory?.items() || []).filter(i => /_log$/.test(i.name)).reduce((s, i) => s + (i.count || 1), 0);
+                            const plankCount2 = (this.bot.inventory?.items() || []).filter(i => /_planks$/.test(i.name)).reduce((s, i) => s + (i.count || 1), 0);
+                            if (logCount2 > 0 && plankCount2 < 4) {
+                                // Find the specific log type in inventory
+                                const logItem = (this.bot.inventory?.items() || []).find(i => /_log$/.test(i.name));
+                                const logName = logItem?.name || 'oak_log';
+                                const plankName = logName.replace('_log', '_planks');
+                                console.log(`[Agent] Converting ${logCount2} ${logName} → ${plankName}`);
+                                try {
+                                    const { craftRecipe } = await import('./library/skills.js');
+                                    await craftRecipe(this.bot, plankName, logCount2 * 4);
+                                    await new Promise(r => setTimeout(r, 300));
+                                } catch (_) {}
+                            }
+
+                            // 2c) Craft crafting table (if needed and we have planks)
+                            const plankCount3 = (this.bot.inventory?.items() || []).filter(i => /_planks$/.test(i.name)).reduce((s, i) => s + (i.count || 1), 0);
+                            const hasTable2 = (this.bot.inventory?.items() || []).some(i => i.name === 'crafting_table');
+                            if (!hasTable2 && plankCount3 >= 4) {
+                                console.log(`[Agent] Crafting crafting table`);
+                                try {
+                                    const { craftRecipe } = await import('./library/skills.js');
+                                    await craftRecipe(this.bot, 'crafting_table', 1);
+                                    await new Promise(r => setTimeout(r, 300));
+                                } catch (_) {}
+                            }
+
+                            // 2d) Craft wooden sword (defense first!)
+                            const hasSword3 = (this.bot.inventory?.items() || []).some(i => /_sword/.test(i.name));
+                            const hasTable3 = (this.bot.inventory?.items() || []).some(i => i.name === 'crafting_table');
+                            if (!hasSword3 && hasTable3 && plankCount3 >= 1) {
+                                console.log(`[Agent] Crafting wooden sword for defense`);
+                                try {
+                                    const { craftRecipe } = await import('./library/skills.js');
+                                    await craftRecipe(this.bot, 'wooden_sword', 1);
+                                    await new Promise(r => setTimeout(r, 300));
+                                    // Equip sword immediately
+                                    const sword = this.bot.inventory?.items()?.find(i => /_sword/.test(i.name));
+                                    if (sword) await this.bot.equip(sword, 'hand');
+                                } catch (_) {}
+                            }
+
+                            // 2e) Craft sticks (needed for pickaxe — pro players know this!)
+                            const hasSticks = (this.bot.inventory?.items() || []).some(i => i.name === 'stick');
+                            const plankCount4 = (this.bot.inventory?.items() || []).filter(i => /_planks$/.test(i.name)).reduce((s, i) => s + (i.count || 1), 0);
+                            if (!hasSticks && hasTable3 && plankCount4 >= 2) {
+                                console.log(`[Agent] Crafting sticks from planks`);
+                                try {
+                                    const { craftRecipe } = await import('./library/skills.js');
+                                    await craftRecipe(this.bot, 'stick', 4);
+                                } catch (_) {}
+                            }
+
+                            // 2f) Craft wooden pickaxe (for stone mining)
+                            const hasPickaxe3 = (this.bot.inventory?.items() || []).some(i => /_pickaxe/.test(i.name));
+                            const stickCount2 = (this.bot.inventory?.items() || []).filter(i => i.name === 'stick').reduce((s, i) => s + (i.count || 1), 0);
+                            const plankCount5 = (this.bot.inventory?.items() || []).filter(i => /_planks$/.test(i.name)).reduce((s, i) => s + (i.count || 1), 0);
+                            if (!hasPickaxe3 && hasTable3 && plankCount5 >= 3 && stickCount2 >= 2) {
+                                console.log(`[Agent] Crafting wooden pickaxe`);
+                                try {
+                                    const { craftRecipe } = await import('./library/skills.js');
+                                    await craftRecipe(this.bot, 'wooden_pickaxe', 1);
+                                } catch (_) {}
+                            }
+
+                            // ═══════════════════════════════════════════════════════════
+                            // PHASE 3: STONE TOOLS — upgrade to stone ASAP
+                            // ═══════════════════════════════════════════════════════════
+                            // Research: stone tools are 30% faster, essential for iron mining
+
+                            // Health check between phases — eat if hurt
+                            if (!healthCheck()) { console.log('[Agent] Bot died between phases 2→3'); return; }
+                            try {
+                                if ((this.bot.health ?? 20) < 12) {
+                                    console.log(`[Agent] Health ${Math.round(this.bot.health)} between phases — eating`);
+                                    await eatBestFood(this.bot);
+                                    await new Promise(r => setTimeout(r, 500));
+                                }
+                            } catch (_) {}
+
+                            const inv3 = this.bot.inventory?.items() || [];
+                            const hasCobble = inv3.some(i => i.name === 'cobblestone');
+                            const hasStonePick = inv3.some(i => /stone_pickaxe/.test(i.name));
+                            const hasStoneSword = inv3.some(i => /stone_sword/.test(i.name));
+                            const hasPickaxe4 = inv3.some(i => /_pickaxe/.test(i.name));
+
+                            // Mine cobblestone if we have a pickaxe but no stone tools yet
+                            if (hasPickaxe4 && (!hasStonePick || !hasStoneSword)) {
+                                // Health check before mining — don't mine while low
+                                if ((this.bot.health ?? 20) < 10) {
+                                    console.log(`[Agent] Too low on health (${Math.round(this.bot.health)}) to mine — eating first`);
+                                    try { await eatBestFood(this.bot); await new Promise(r => setTimeout(r, 500)); } catch (_) {}
+                                }
+                                console.log(`[Agent] Mining cobblestone for stone tools`);
+                                try {
+                                    const { collectBlock } = await import('./library/skills.js');
+                                    // Mine 8 cobblestone (2 for pickaxe + 2 for sword + extras)
+                                    await collectBlock(this.bot, 'stone', 8);
+                                    await new Promise(r => setTimeout(r, 500));
+                                } catch (_) {}
+                            }
+
+                            // Craft stone sword (upgrade defense)
+                            const cobbleCount = (this.bot.inventory?.items() || []).filter(i => i.name === 'cobblestone').reduce((s, i) => s + (i.count || 1), 0);
+                            const stickCount = (this.bot.inventory?.items() || []).filter(i => i.name === 'stick').reduce((s, i) => s + (i.count || 1), 0);
+                            if (!hasStoneSword && cobbleCount >= 2 && stickCount >= 1) {
+                                console.log(`[Agent] Crafting stone sword`);
+                                try {
+                                    const { craftRecipe } = await import('./library/skills.js');
+                                    await craftRecipe(this.bot, 'stone_sword', 1);
+                                    await new Promise(r => setTimeout(r, 300));
+                                    const sword = this.bot.inventory?.items()?.find(i => /stone_sword/.test(i.name));
+                                    if (sword) await this.bot.equip(sword, 'hand');
+                                } catch (_) {}
+                            }
+
+                            // Craft stone pickaxe (upgrade mining)
+                            if (!hasStonePick && cobbleCount >= 3 && stickCount >= 2) {
+                                console.log(`[Agent] Crafting stone pickaxe`);
+                                try {
+                                    const { craftRecipe } = await import('./library/skills.js');
+                                    await craftRecipe(this.bot, 'stone_pickaxe', 1);
+                                    await new Promise(r => setTimeout(r, 300));
+                                    const pick = this.bot.inventory?.items()?.find(i => /stone_pickaxe/.test(i.name));
+                                    if (pick) await this.bot.equip(pick, 'hand');
+                                } catch (_) {}
+                            }
+
+                            // ═══════════════════════════════════════════════════════════
+                            // PHASE 4: WALK TO SAFE STARTING POSITION
+                            // ═══════════════════════════════════════════════════════════
+
+                            if (p) {
+                                let walkX, walkZ;
+                                try {
+                                    const { isWoodBlockName } = await import('../utils/item_families.js');
+                                    const blocks = this.bot.findBlocks({ matching: (b) => isWoodBlockName(b?.name), maxDistance: 48, count: 1 });
+                                    if (blocks.length > 0) {
+                                        const treePos = blocks[0];
+                                        walkX = Math.round(treePos.x);
+                                        walkZ = Math.round(treePos.z);
+                                        console.log(`[Agent] Heading toward tree at (${walkX}, ${walkZ})`);
+                                    } else {
+                                        throw new Error('no trees found');
+                                    }
+                                } catch {
+                                    const angle = Math.random() * 2 * Math.PI;
+                                    walkX = Math.round(p.x + Math.cos(angle) * 30);
+                                    walkZ = Math.round(p.z + Math.sin(angle) * 30);
+                                    console.log(`[Agent] No trees nearby — random walk to (${walkX}, ${walkZ})`);
+                                }
+                                try {
+                                    const { sprintJumpToward } = await import('./library/skills.js');
+                                    await sprintJumpToward(this.bot, { x: walkX, y: Math.round(p.y), z: walkZ }, 3, 12000);
+                                } catch (_) {
+                                    // Fallback to pathfinder
+                                    await walkSkill({ x: walkX, y: Math.round(p.y), z: walkZ, range: 3 });
+                                }
+                                console.log(`[Agent] Arrived at (${Math.round(this.bot.entity?.position?.x)}, ${Math.round(this.bot.entity?.position?.z)})`);
                             }
                         } catch (walkErr) {
-                            console.warn(`[Agent] Walk-away failed: ${walkErr.message}, continuing with grind anyway`);
+                            console.warn(`[Agent] Pre-grind survival failed: ${walkErr.message}, continuing with grind anyway`);
                         }
 
                         // Pause unstuck mode during diamond grind
                         if (this.bot.modes) this.bot.modes.pause('unstuck');
 
                         try {
-                            for (let i = 0; i < settings._taskSteps.length; i++) {
+                            const stepRetries = {};
+                            const MAX_STEP_RETRIES = 3;
+                            const MAX_REPLANS = 5;
+                            let replanCount = 0;
+
+                            for (let i = startStep; i < settings._taskSteps.length; i++) {
                                 if (!this.bot?.entity) {
                                     console.error(`[Agent] Bot disconnected — stopping grind at step ${i + 1}`);
                                     break;
                                 }
+
+                                // Save progress after each step completion
+                                this._currentStepIndex = i;
+
+                                // ═══════════════════════════════════════════════════════════
+                                // REACTIVE REPLANNER: when step fails, replan from current state
+                                // ═══════════════════════════════════════════════════════════
+                                // Research shows: when a step fails, don't skip — replan from
+                                // current state to find an alternative path to the goal.
+
                                 const step = settings._taskSteps[i];
                                 if (!step || !step.skill) {
                                     console.log(`[Agent] Step ${i + 1}: invalid, skipping`);
                                     continue;
                                 }
+
+                                // Check for interrupt (emergency from SpinalCord)
                                 if (this.bot.interrupt_code) {
-                                    console.log('[Agent] Task interrupted');
-                                    break;
+                                    console.log(`[Agent] Step ${i + 1} interrupted — waiting out emergency...`);
+                                    let guard = 0;
+                                    while ((this.bot.interrupt_code || this.brain?.motor?.isBusy) && guard < 20) {
+                                        await new Promise(r => setTimeout(r, 500));
+                                        guard++;
+                                    }
+                                    stepRetries[i] = (stepRetries[i] || 0) + 1;
+                                    if (stepRetries[i] <= MAX_STEP_RETRIES) {
+                                        this.bot.interrupt_code = false;
+                                        i--;
+                                        continue;
+                                    }
+                                    console.warn(`[Agent] Step ${i + 1} interrupted ${stepRetries[i]}x — skipping`);
                                 }
+
                                 const outputBefore = (this.bot.output || '').length;
                                 console.log(`[Agent] Step ${i + 1}/${settings._taskSteps.length}: ${step.skill}(${JSON.stringify(step.params || {})})`);
+
+                                let stepFailed = false;
                                 try {
                                     const SkillFn = this.taskRunner.skills[step.skill];
                                     if (SkillFn) {
                                         const result = await SkillFn(step.params || {});
                                         if (result === false) {
                                             console.warn(`[Agent] Step ${i + 1} returned false (failed)`);
+                                            stepFailed = true;
                                         } else if (result === true) {
                                             console.log(`[Agent] Step ${i + 1} succeeded`);
+                                            // Save progress after each successful step for death recovery
+                                            this._currentStepIndex = i + 1;
+                                            this._saveTaskProgress();
                                         }
                                     } else {
                                         console.warn(`[Agent] Unknown skill: ${step.skill}`);
+                                        stepFailed = true;
                                     }
                                 } catch (stepErr) {
                                     console.warn(`[Agent] Step ${i + 1} threw: ${stepErr.message}`);
+                                    stepFailed = true;
                                 }
+
+                                // ═══════════════════════════════════════════════════════════
+                                // REACTIVE REPLANNER: if step failed, try to replan
+                                // ═══════════════════════════════════════════════════════════
+                                if (stepFailed && replanCount < MAX_REPLANS) {
+                                    console.log(`[Agent] Step ${i + 1} failed — attempting reactive replan (${replanCount + 1}/${MAX_REPLANS})`);
+                                    try {
+                                        // Get current state from brain
+                                        const snapshot = this.brain?.getSnapshot?.();
+                                        if (snapshot && this.brain?.executive) {
+                                            // Ask executive brain for a new plan based on current state
+                                            const newDecision = this.brain.executive.decide(snapshot);
+                                            if (newDecision?.steps && newDecision.steps.length > 0) {
+                                                console.log(`[Agent] Replan: ${newDecision.task} with ${newDecision.steps.length} steps`);
+                                                // Replace remaining steps with new plan
+                                                const remainingSteps = newDecision.steps;
+                                                settings._taskSteps = [
+                                                    ...settings._taskSteps.slice(0, i),
+                                                    ...remainingSteps,
+                                                    ...settings._taskSteps.slice(i + 1)
+                                                ];
+                                                replanCount++;
+                                                i--; // Re-execute from current position with new steps
+                                                continue;
+                                            }
+                                        }
+                                    } catch (replanErr) {
+                                        console.warn(`[Agent] Replan failed: ${replanErr.message}`);
+                                    }
+                                }
+
                                 // Log skill output
                                 if (this.bot.output && this.bot.output.length > outputBefore) {
                                     const newOutput = this.bot.output.substring(outputBefore).trim();
                                     if (newOutput) console.log(`  => ${newOutput}`);
                                 }
-                                // Re-assert busy — reflexes may have cleared it
+
+                                // Re-assert busy — idempotent pin, survives reflex cycles
                                 if (this.brain && this.brain.motor) {
-                                    this.brain.motor.isBusy = true;
+                                    this.brain.motor.pinBusy('grind');
                                 }
-                                // Human-like delay between steps
-                                await new Promise(r => setTimeout(r, 500 + Math.random() * 1500));
+                                await humanPause(PACE.ACTION_GAP_MIN, PACE.ACTION_GAP_MAX);
                             }
                             console.log('[Agent] Diamond grind task completed!');
+                            this._clearTaskProgress();
                         } catch (e) {
                             console.error(`[Agent] Task execution error: ${e.message}`);
                         } finally {
                             if (this.brain && this.brain.motor) {
-                                this.brain.motor.isBusy = false;
+                                // Release the claim without cancelling any goal
+                                // the brain started in the meantime.
+                                this.brain.motor.unpinBusy('grind');
                             }
                             // After diamond grind, continue with productive work
                             console.log('[Agent] Task done. AyushiOS brain will continue autonomous operation.');
@@ -507,11 +1029,55 @@ export class Agent extends EventEmitter {
 
             } catch (error) {
                 console.error('Error in spawn event:', error);
-                process.exit(0);
+                // Exit non-zero: AgentProcess only restarts on crashes (code !== 0).
+                // A code-0 exit here reads as an intentional stop and strands the bot.
+                process.exit(1);
             } finally {
                 clearTimeout(spawnTimeout);
             }
         });
+    }
+
+    _saveTaskProgress() {
+        if (!this._currentTaskFile || this._currentStepIndex === undefined) return;
+        try {
+            const dir = path.join('bots', this.name);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            const data = {
+                taskFile: this._currentTaskFile,
+                stepIndex: this._currentStepIndex,
+                timestamp: Date.now(),
+            };
+            fs.writeFileSync(path.join(dir, 'task_progress.json'), JSON.stringify(data, null, 2));
+            console.log(`[Agent] Saved task progress: step ${this._currentStepIndex}/${this._currentTotalSteps}`);
+        } catch (e) {
+            console.warn(`[Agent] Failed to save task progress: ${e.message}`);
+        }
+    }
+
+    _loadTaskProgress() {
+        try {
+            const file = path.join('bots', this.name, 'task_progress.json');
+            if (!fs.existsSync(file)) return null;
+            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+            if (!data.taskFile || data.stepIndex === undefined) return null;
+            if (Date.now() - data.timestamp > 3600000) {
+                fs.unlinkSync(file);
+                return null;
+            }
+            return data;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    _clearTaskProgress() {
+        try {
+            const file = path.join('bots', this.name, 'task_progress.json');
+            if (fs.existsSync(file)) fs.unlinkSync(file);
+            this._currentTaskFile = null;
+            this._currentStepIndex = undefined;
+        } catch (_) {}
     }
 
     _enqueueMessage(username, message) {
@@ -533,6 +1099,13 @@ export class Agent extends EventEmitter {
         this._processingMessage = true;
         while (this._messageQueue.length > 0) {
             const item = this._messageQueue.shift();
+            // Stale messages read as non-sequiturs — the moment passed.
+            if (Date.now() - item.ts > 15000) {
+                console.log('[CHAT] dropping stale queued message from', item.username);
+                continue;
+            }
+            // Human reaction time — instant replies look robotic.
+            await humanPause(PACE.REPLY_MIN, PACE.REPLY_MAX);
             try {
                 await this.handleMessage(item.username, item.message);
             } catch (err) {
@@ -540,7 +1113,6 @@ export class Agent extends EventEmitter {
                 await new Promise(r => setTimeout(r, 1000));
                 continue;
             }
-            await new Promise(r => setTimeout(r, 100));
         }
         this._processingMessage = false;
     }
@@ -552,39 +1124,6 @@ export class Agent extends EventEmitter {
         if (dup) { dup.ts = now; return true; }
         this._recentCommands.push({ name: cmdName, ts: now });
         return false;
-    }
-
-    _cannedResponse(message) {
-        const m = message.toLowerCase();
-        const greetings = ['hi', 'hello', 'hey', 'yo', 'sup', 'whats up', 'heyy'];
-        if (greetings.some(g => m.includes(g))) return 'yo';
-        if (m.includes('come') || m.includes('follow')) return 'coming';
-        if (m.includes('stop') || m.includes('stay') || m.includes('wait')) return 'alright';
-        if (m.includes('go') || m.includes('move')) return 'moving';
-        if (m.includes('here') || m.includes('this way')) return 'on my way';
-        if (m.includes('inventory') || m.includes('what do you have')) {
-            const inv = this.bot?.inventory?.items() || [];
-            const items = inv.map(i => `${i.count}x ${i.displayName || i.name}`).join(', ');
-            return items ? `got ${items}` : 'nothing on me';
-        }
-        if (m.includes('hp') || m.includes('health') || m.includes('status')) {
-            const hp = this.bot?.health?.toFixed(1) || '?';
-            const food = this.bot?.food?.toFixed(0) || '?';
-            return `hp ${hp} food ${food}`;
-        }
-        if (m.includes('where') || m.includes('pos') || m.includes('location')) {
-            const p = this.bot?.entity?.position;
-            return p ? `at ${p.x.toFixed(0)} ${p.y.toFixed(0)} ${p.z.toFixed(0)}` : 'dunno';
-        }
-        if (m.includes('thanks') || m.includes('ty') || m.includes('thx')) return 'np';
-        if (m.includes('bye') || m.includes('cya')) return 'cya';
-        if (m.includes('mine') || m.includes('dig') || m.includes('collect')) return 'on it';
-        if (m.includes('build') || m.includes('place')) return 'building';
-        if (m.includes('attack') || m.includes('kill') || m.includes('fight')) return 'fighting';
-        if (m.includes('farm') || m.includes('plant')) return 'farming';
-        if (m.includes('craft') || m.includes('make')) return 'crafting';
-        if (m.includes('sleep') || m.includes('bed')) return 'sleeping';
-        return `got it`;
     }
 
     async _setupEventHandlers(save_data, init_message) {
@@ -601,7 +1140,7 @@ export class Agent extends EventEmitter {
 
         const respondFunc = async (username, message) => {
             if (!message || message === "") return;
-            this._lastHeartbeat = Date.now();
+            this._lastKeepAliveAck = Date.now();
             if (username === this.name) return;
             const dedupKey = `${username}:${message}`;
             const now = Date.now();
@@ -609,6 +1148,13 @@ export class Agent extends EventEmitter {
             if (lastSeen && now - lastSeen < 2000) return;
             if (!this._recentChats) this._recentChats = new Map();
             this._recentChats.set(dedupKey, now);
+            // Dedupe entries are only valid for 2s — drop expired ones so the
+            // map can't grow unbounded over long uptimes.
+            if (this._recentChats.size > 500) {
+                for (const [k, t] of this._recentChats) {
+                    if (now - t >= 2000) this._recentChats.delete(k);
+                }
+            }
             console.log('[CHAT] received:', username, '▶', message);
             const usernameLower = username.toLowerCase();
             if (settings.only_chat_with.length > 0 && !settings.only_chat_with.some(u => u.toLowerCase() === usernameLower)) return;
@@ -616,8 +1162,9 @@ export class Agent extends EventEmitter {
 
             this.last_sender = username;
             this.shut_up = false;
-            // Track as whisper target so openChat replies via /msg even if whisper event never fires
-            this._whisperLast[username] = Date.now();
+            // NOTE: _whisperLast is set ONLY by the real whisper listener.
+            // Marking public chats here made openChat whisper replies to
+            // public messages for 60s — the "two reply styles" bug.
 
             if (usernameLower === MASTER_PLAYER.toLowerCase()) {
                 this.requestInterrupt();
@@ -648,12 +1195,7 @@ export class Agent extends EventEmitter {
             if (this.relationshipManager) {
                 this.relationshipManager.recordMessage(username, translation);
             }
-            if (this.brain?.memory) {
-                this.brain.memory.updatePlayerRelationship(username, 0, 'chatted');
-            }
-            if (this.knowledgeGraph) {
-                this.knowledgeGraph.learnTriple(username, 'chatted_with', this.name);
-            }
+            // Brain social memory updated via relationshipManager events
             // Fast-path dialogue has already replied; do not also queue an LLM response.
             if (!handledByBroca) this._enqueueMessage(username, translation);
         }
@@ -767,11 +1309,16 @@ export class Agent extends EventEmitter {
  
         // [AyushiOS] Raw packet interceptors — catch messages on any protocol version
         if (this.bot._client) {
-            // DEBUG: Log ALL packet names to identify chat packet type on this server
+            // Packet debug logger — disabled by default (was spamming console + burning CPU).
+            // Enable via settings.debug_packets = true when diagnosing protocol issues.
             const knownChatPackets = new Set(['chat', 'playerChat', 'systemChat']);
-            const highFreq = new Set(['tick', 'position', 'update_attributes', 'entity_metadata', 'entity_velocity', 'entity_position', 'entity_move_look', 'entity_head_rotation', 'rel_entity_move', 'entity_equipment', 'entity_effect', 'remove_entity_effect', 'world_event', 'named_sound_effect', 'sound_effect', 'block_break_animation', 'block_action', 'block_update', 'explosion', 'spawn_entity', 'spawn_entity_living', 'spawn_entity_experience_orb', 'entity_destroy', 'entity_look', 'entity_tracking', 'entity_status', 'entity_teleport', 'animation', 'collect', 'keep_alive', 'time_update', 'set_slot', 'window_items', 'map_chunk', 'light_update', 'update_light', 'unload_chunk', 'multi_block_change', 'block_change', 'server_data', 'tags', 'sync_player_position']);
+            const highFreq = new Set(['tick', 'position', 'update_attributes', 'entity_metadata', 'entity_velocity', 'entity_position', 'entity_move_look', 'entity_head_rotation', 'rel_entity_move', 'entity_equipment', 'entity_effect', 'remove_entity_effect', 'world_event', 'named_sound_effect', 'sound_effect', 'block_break_animation', 'block_action', 'block_update', 'explosion', 'spawn_entity', 'spawn_entity_living', 'spawn_entity_experience_orb', 'entity_destroy', 'entity_look', 'entity_tracking', 'entity_status', 'entity_teleport', 'animation', 'collect', 'keep_alive', 'time_update', 'set_slot', 'window_items', 'map_chunk', 'light_update', 'update_light', 'unload_chunk', 'multi_block_change', 'block_change', 'server_data', 'tags', 'sync_player_position', 'ping_request', 'pong_response', 'declare_commands', 'select_known_packs', 'custom_payload', 'disconnect', 'login', 'success', 'compress', 'position_look', 'flying', 'look', 'held_item_slot', 'abilities', 'experience', 'health', 'spawn_position', 'rel_entity_move', 'attach_entity', 'change_difficulty', 'tab_complete', 'statistics', 'unlock_recipes', 'advancements', 'craft_progress', 'open_window', 'close_window', 'window_click', 'transaction', 'entity_equipment', 'scoreboard_objective', 'scoreboard_score', 'scoreboard_display_objective', 'teams', 'title', 'sound_or_soundeffect', 'stop_sound', 'boss_bar', 'camera', 'update_view_position', 'update_view_distance', 'chunk_batch_finished', 'chunk_batch_start', 'chunks_biomes', 'forget_level_chunk', 'level_chunk_with_light', 'initialize_border', 'set_border_center', 'set_border_lerp_size', 'set_border_size', 'set_border_warning_delay', 'set_border_warning_distance', 'set_default_spawn_position', 'bundle_delimiter', 'player_info', 'player_remove', 'combat_event', 'damage_event', 'hurt_animation', 'death_combat_event', 'entity_velocity']);
+            const debugPackets = settings.debug_packets === true;
             const onAnyPacket = (data, metadata) => {
-                const packetName = metadata?.name || typeof data === 'object' ? data?.name : null;
+                if (!debugPackets) return;
+                // Fix: original had an operator-precedence bug — `a || b ? c : null`
+                // evaluated as `(a || b) ? c : null`, ignoring metadata.name.
+                const packetName = metadata?.name || (typeof data === 'object' ? data?.name : null);
                 if (!packetName) return;
                 if (knownChatPackets.has(packetName)) {
                     const raw = data?.plainMessage || data?.message || data?.formattedMessage || data?.text || '';
@@ -939,7 +1486,14 @@ export class Agent extends EventEmitter {
         const MASTER_PLAYER = 'updesh';
         const is_master = source === MASTER_PLAYER;
 
-        if (is_master || (source !== 'system' && !from_other_bot)) {
+        // Security gate for direct !commands (H6): external senders may execute
+        // commands only if they are the master or listed in settings.only_chat_with
+        // (empty list = legacy open behavior). Internal sources ('system' = the
+        // bot's own autonomous loop, other bots) keep their existing behavior.
+        const allowed_senders = settings.only_chat_with || [];
+        const sender_allowed = allowed_senders.length === 0
+            || allowed_senders.some(u => u.toLowerCase() === String(source).toLowerCase());
+        if (is_master || (sender_allowed && source !== 'system' && !from_other_bot)) {
             const user_command_name = containsCommand(message);
             if (user_command_name) {
                 if (!commandExists(user_command_name)) return false;
@@ -949,13 +1503,14 @@ export class Agent extends EventEmitter {
                 if (isAction(user_command_name)) {
                     this.routeResponse(source, `*${source} used ${user_command_name.substring(1)}*`);
                 }
-                // Pause autonomous brain during manual command
-                if (this.brain && this.brain.motor) this.brain.motor.isBusy = true;
+                // Pause autonomous brain during manual command (claim, don't
+                // cancel — the running goal resumes when the command finishes)
+                if (this.brain && this.brain.motor) this.brain.motor.pinBusy('manual-command');
                 try {
                     let execute_res = await executeCommand(this, message);
                     if (execute_res) this.routeResponse(source, execute_res);
                 } finally {
-                    if (this.brain && this.brain.motor) this.brain.motor.isBusy = false;
+                    if (this.brain && this.brain.motor) this.brain.motor.unpinBusy('manual-command');
                 }
                 return true;
             }
@@ -1021,6 +1576,10 @@ export class Agent extends EventEmitter {
                 }
                 return true;
             }
+
+            // A fast reply already answered this message — don't let the
+            // deterministic brain stack a second reply on top of it.
+            if (fastReplySent) return true;
         }
 
         let behavior_log = this.bot.modes.flushBehaviorLog().trim();
@@ -1036,7 +1595,10 @@ export class Agent extends EventEmitter {
 
         if (settings.enable_llm === false) {
             if (is_master && !self_prompt) {
-                this.routeResponse(source, this._cannedResponse(message));
+                // Deterministic brain: RiveScript + node-nlp + Markov + RuleBrain
+                await this.deterministicBrain._initPromise;
+                const reply = await this.deterministicBrain.handle(source, message);
+                if (reply) this.routeResponse(source, reply);
             }
             return true;
         }
@@ -1225,6 +1787,8 @@ export class Agent extends EventEmitter {
             if (this.serverAnalyzer) {
                 this.serverAnalyzer.onDeath('death');
             }
+            // Save task progress before dying so we can resume after respawn
+            this._saveTaskProgress();
             // Clear stale goal state so we don't resume explore with far-away coords
             if (this.brain?.executive) {
                 this.brain.executive.lastInterruptedGoal = null;
@@ -1247,7 +1811,6 @@ export class Agent extends EventEmitter {
                     const killer = jsonMsg.with?.find(w => typeof w === 'object' && w.text)?.text;
                     if (killer) {
                         this.relationshipManager.recordEvent(killer, 'attack');
-                        this.brain?.memory?.updatePlayerRelationship(killer, -2, 'killed bot');
                     }
                 }
                 let death_pos_text = null;
@@ -1302,13 +1865,17 @@ export class Agent extends EventEmitter {
         if (this.actions.executing) return;
         if (!settings.bt_enabled) return;
         // [AyushiOS coexistence] Skip BT if brain's motor cortex is running an autonomous task
-        if (this.brain && this.brain.motor && this.brain.motor.isBusy) {
+        // ...or if TaskRunner is mid-task (expeditions etc.) — otherwise BT reflexes
+        // keep stealing the pathfinder and cancelling the task's navigation.
+        const taskRunnerBusy = this.taskRunner?.isRunning?.() ?? false;
+        if (this.brain && this.brain.motor && (this.brain.motor.isBusy || taskRunnerBusy)) {
             const now = Date.now();
             if (!this._busySince) this._busySince = now;
             const isTaskBusy = settings._taskSteps?.length > 0;
             const maxBusy = isTaskBusy ? 1200000 : 300000;
             if (now - this._busySince > maxBusy) {
                 console.warn(`[Watchdog] motor.isBusy stale for ${((now - this._busySince)/1000).toFixed(0)}s — force-clearing`);
+                this.brain.motor.releaseAllBusyPins('watchdog stale-busy force-clear');
                 this.brain.motor.isBusy = false;
                 this._busySince = 0;
             } else {
@@ -1339,7 +1906,7 @@ export class Agent extends EventEmitter {
             console.log(msg);
             this.btCurrentTask = this.btTree.build(interrupt, state);
             if (this.btCurrentTask) {
-                const ctx = { bot: this.bot, state, _btGen: this.btTree._generation };
+                const ctx = { bot: this.bot, state, _btGen: this.btTree._generation, agent: this };
                 const status = this.btCurrentTask.tick(ctx);
                 if (status === 'SUCCESS' || status === 'FAILURE') {
                     this.btCurrentTask = null;
@@ -1359,7 +1926,7 @@ export class Agent extends EventEmitter {
         }
 
         if (this.btCurrentTask) {
-            const ctx = { bot: this.bot, state, _btGen: this.btTree._generation };
+            const ctx = { bot: this.bot, state, _btGen: this.btTree._generation, agent: this };
             const status = this.btCurrentTask.tick(ctx);
             if (status === 'SUCCESS' || status === 'FAILURE') {
                 if (settings.bt_log) console.log(`[BT] Task finished: ${status}`);
@@ -1371,11 +1938,10 @@ export class Agent extends EventEmitter {
     }
 
     async update(delta) {
-        if (this.bot?.entity && Date.now() - this._lastHeartbeat > 300000) {
-            try { this.bot.chat(''); } catch {
-                log(this.name, 'Connection appears dead, reconnecting...');
-                process.exit(1);
-            }
+        if (this.bot?.entity && Date.now() - this._lastKeepAliveAck > 60000) {
+            const staleFor = Math.round((Date.now() - this._lastKeepAliveAck) / 1000);
+            log(this.name, `No keep-alive from server for ${staleFor}s — connection appears dead, restarting...`);
+            process.exit(1);
         }
 
         if (this._pendingChats.length > 0 && this.bot?.entity && settings.chat_ingame) {
@@ -1388,13 +1954,20 @@ export class Agent extends EventEmitter {
         await this.bot.modes.update();
 
         if (settings.bt_enabled) {
-            this._btTick();
+            // P0-4: legacy path. BT strategic scoring is retired while the
+            // AyushiOS brain is active — two strategists = two steering wheels.
+            if (this.brain?.executive) {
+                console.warn('[Agent] bt_enabled ignored — AyushiOS brain is active (single-authority rule)');
+            } else {
+                this._btTick();
+            }
             await this.checkTaskDone();
         } else {
             this.self_prompter.update(delta);
             await this.checkTaskDone();
 
-            if (this.goalPlanner) {
+            if (this.goalPlanner && !this.brain?.executive) {
+                // GoalPlanner advisor ticks are brain-owned when the brain runs.
                 await this.goalPlanner.tick();
             }
         }
@@ -1446,6 +2019,52 @@ export class Agent extends EventEmitter {
         if (this.actions.executing) return false;
         if (this.brain && this.brain.motor && this.brain.motor.isBusy) return false;
         return true;
+    }
+
+    /**
+     * Periodic inventory maintenance (every ~8s):
+     *  - auto-equip better armor / swap dying gear
+     *  - remember chests we walk past
+     *  - sort + compact when fragmented
+     *  - drop junk when nearly full (never tools/food/torches)
+     * Runs ONLY while idle so it never fights an active task.
+     */
+    async _inventoryTick() {
+        const im = this.inventoryManager;
+        if (!im || !this.bot?.entity) return;
+        // Never fight active motor work
+        if (this.actions.executing) return;
+        if (this.brain?.motor?.isBusy || this.taskRunner?.isRunning?.()) return;
+
+        await im.maintainGear();
+
+        // Remember any chest within 24 blocks (free spatial knowledge)
+        try {
+            const chest = this.bot.findBlock({ matching: b => b.name === 'chest' || b.name === 'barrel', maxDistance: 24 });
+            if (chest && !im.chests.some(c => c.key === `${chest.position.x},${chest.position.y},${chest.position.z}`)) {
+                im.rememberChest(chest.position, null);
+            }
+        } catch (_) {}
+
+        const needs = im.needs();
+        if (needs.full || needs.nearlyFull) {
+            await im.makeRoom(2);
+        }
+        // Occasional tidy-up (max once per 3 min)
+        if (Date.now() - (im._lastSortAt || 0) > 180000 && !needs.full) {
+            await im.compact({ sort: true });
+            await im.ensureHotbarLoadout();
+        }
+
+        // ── SELF-CARE: proactive eating — a starving bot looks dumb no
+        // matter how good its planner is. Eat when food ≤ 14 while idle.
+        try {
+            const bot = this.bot;
+            if ((bot.food ?? 20) <= 14) {
+                const { eatBestFood } = await import('./library/skills.js');
+                await eatBestFood(bot);
+            }
+        } catch (_) {}
     }
     
 

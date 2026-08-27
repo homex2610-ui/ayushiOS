@@ -159,6 +159,7 @@ class ItemNode {
             let to_smelt_quantity = Math.min(quantity, inventory[to_smelt_name] || 1);
             await skills.smeltItem(this.manager.agent.bot, to_smelt_name, to_smelt_quantity);
         } else if (this.type === 'hunt') {
+            let res;
             for (let i=0; i<quantity; i++) {
                 res = await skills.attackNearest(this.manager.agent.bot, this.source);
                 if (!res || this.manager.agent.bot.interrupt_code)

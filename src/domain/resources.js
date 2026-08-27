@@ -6,7 +6,7 @@
 
 export const RESOURCES = {
   WOOD:            { id: 'wood',            name: 'Wood',            types: ['oak_log', 'spruce_log', 'birch_log', 'jungle_log'], category: 'material' },
-  PLANKS:          { id: 'planks',          name: 'Planks',          types: ['oak_planks'], category: 'material' },
+  PLANKS:          { id: 'planks',          name: 'Planks',          types: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'mangrove_planks', 'cherry_planks', 'bamboo_planks', 'crimson_planks', 'warped_planks'], category: 'material' },
   STICK:           { id: 'stick',           name: 'Stick',           types: ['stick'], category: 'material' },
   STONE:           { id: 'stone',           name: 'Stone',           types: ['cobblestone', 'stone'], category: 'material' },
   COAL:            { id: 'coal',            name: 'Coal',            types: ['coal', 'charcoal'], category: 'fuel' },

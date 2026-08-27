@@ -281,8 +281,9 @@ export class GoalPlanner {
         }
         return [
             { skill: 'move_to', params: { x: state.position.x + 10, y: state.position.y, z: state.position.z + 10, range: 4 } },
-            { skill: 'collect', params: { item: 'oak_log', count: 8 } },
-            { skill: 'craft', params: { item: 'oak_planks', count: 16 } }
+            // Generic wood: any log species, converted by craft_planks
+            { skill: 'collect', params: { item: 'log', count: 8 } },
+            { skill: 'craft_planks', params: { count: 16 } }
         ];
     }
 

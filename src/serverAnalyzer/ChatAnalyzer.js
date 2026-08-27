@@ -50,20 +50,21 @@ const PLUGIN_PATTERNS = [
 ];
 
 export class ChatAnalyzer {
-    constructor(knowledgeBase, logger) {
+    constructor(knowledgeBase, logger, ownerName = null) {
         this.kb = knowledgeBase;
         this.log = logger || ((...a) => {});
+        this.ownerName = ownerName;
         this.recentMessages = [];
         this.maxRecent = 50;
     }
 
-    feed(rawMessage) {
+    feed(rawMessage, senderName = null) {
         this.kb.data.stats.messagesParsed++;
         this.recentMessages.push(rawMessage);
         if (this.recentMessages.length > this.maxRecent) this.recentMessages.shift();
 
         this._detectSystemPatterns(rawMessage);
-        this._detectCommands(rawMessage);
+        this._detectCommands(rawMessage, senderName);
         this._detectPlugins(rawMessage);
         this._detectLinks(rawMessage);
     }
@@ -75,14 +76,14 @@ export class ChatAnalyzer {
                 this.kb.push('chatEvents', { type: p.type, raw: msg, ts: Date.now() });
 
                 if (p.type === 'balance') {
-                    const amt = parseFloat(m[1].replace(',', ''));
+                    const amt = parseFloat(m[1].replace(/,/g, ''));
                     if (!isNaN(amt)) {
                         this.kb.set('economy.enabled', true);
                         this.kb.set('economy.lastBalance', amt);
                     }
                 }
                 if (p.type === 'earnings') {
-                    const amt = parseFloat(m[1].replace(',', ''));
+                    const amt = parseFloat(m[1].replace(/,/g, ''));
                     if (!isNaN(amt)) {
                         this.kb.set('economy.enabled', true);
                     }
@@ -96,7 +97,18 @@ export class ChatAnalyzer {
         }
     }
 
-    _detectCommands(msg) {
+    _isTrustedSender(senderName) {
+        if (!senderName) return false;
+        const owner = this.ownerName || this.kb.get('server.owner');
+        return !!owner && String(senderName).toLowerCase() === String(owner).toLowerCase();
+    }
+
+    _detectCommands(msg, senderName = null) {
+        // SECURITY: only commands spoken by the trusted owner persist with
+        // probeable confidence. Unknown/non-owner senders are stored at 0.2
+        // (below CommandDiscovery's 0.3 probe threshold) so a chat-harvested
+        // command can never be auto-executed by the bot.
+        const trustedSpeaker = this._isTrustedSender(senderName);
         for (const p of COMMAND_PATTERNS) {
             const m = msg.match(p.re);
             if (m) {
@@ -106,7 +118,8 @@ export class ChatAnalyzer {
                     existing.seenCount = (existing.seenCount || 1) + 1;
                     existing.lastSeen = Date.now();
                 } else {
-                    this.kb.set('commands.' + cmd, { command: cmd, seenCount: 1, firstSeen: Date.now(), lastSeen: Date.now(), confidence: p.type === 'command_used' ? 0.8 : 0.4 });
+                    const confidence = trustedSpeaker ? (p.type === 'command_used' ? 0.8 : 0.4) : 0.2;
+                    this.kb.set('commands.' + cmd, { command: cmd, seenCount: 1, firstSeen: Date.now(), lastSeen: Date.now(), confidence });
                     this.kb.data.stats.commandsDiscovered++;
                 }
                 break;

@@ -1,5 +1,5 @@
 {
-    "name": "ayushi_ds_2026",
+    "name": "AyushiBot",
     "cooldown": 150,
     "models": [
         "ollama/qwen2.5-coder:3b"

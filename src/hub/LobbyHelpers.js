@@ -107,15 +107,24 @@ export async function interactWithNPC(bot, npcName, hotbarManager) {
   }
 
   return new Promise(resolve => {
-    const timeout = setTimeout(() => {
-      console.log(`[LobbyHelpers] NPC interaction done — no GUI opened`);
-      resolve({ success: true, window: null, reason: 'interacted_no_gui' });
-    }, 1500);
-    bot.once('windowOpen', window => {
+    let settled = false;
+    const onWindowOpen = window => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       console.log(`[LobbyHelpers] NPC interaction opened GUI: "${window.title || 'Container'}"`);
       resolve({ success: true, window, reason: 'gui_opened' });
-    });
+    };
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      // Detach the pending listener — leaked once-handlers fire on GUIs
+      // opened much later and accumulate every hub visit.
+      bot.removeListener('windowOpen', onWindowOpen);
+      console.log(`[LobbyHelpers] NPC interaction done — no GUI opened`);
+      resolve({ success: true, window: null, reason: 'interacted_no_gui' });
+    }, 1500);
+    bot.once('windowOpen', onWindowOpen);
   });
 }
 

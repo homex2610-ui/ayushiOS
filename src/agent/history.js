@@ -14,7 +14,11 @@ export class History {
     constructor(agent) {
         this.agent = agent;
         this.name = agent.name;
-        this.memory_fp = `./bots/${this.name}/memory.json`;
+        // P0-7 FIX: History previously wrote bots/<n>/memory.json — the SAME
+        // path MemoryMatrix uses, last-writer-wins, silently destroying
+        // whichever schema lost. Conversation state now owns its own file.
+        this.memory_fp = `./bots/${this.name}/conversation.json`;
+        this._legacy_fp = `./bots/${this.name}/memory.json`; // one-time migration source
         this.full_history_fp = undefined;
 
         mkdirSync(`./bots/${this.name}/histories`, { recursive: true });
@@ -119,6 +123,19 @@ export class History {
 
     load() {
         try {
+            // One-time migration: if the new conversation file doesn't exist
+            // but the legacy shared path does AND it looks like OUR schema
+            // (has `turns`), adopt it. MemoryMatrix-format files (no turns)
+            // are left alone — that's the brain's file now.
+            if (!existsSync(this.memory_fp) && existsSync(this._legacy_fp)) {
+                try {
+                    const legacy = JSON.parse(readFileSync(this._legacy_fp, 'utf8'));
+                    if (Array.isArray(legacy?.turns)) {
+                        writeFileSync(this.memory_fp, JSON.stringify(legacy, null, 2));
+                        console.log('[History] Migrated conversation state from legacy memory.json → conversation.json');
+                    }
+                } catch (_) { /* unreadable/foreign format — ignore */ }
+            }
             if (!existsSync(this.memory_fp)) {
                 return null;
             }

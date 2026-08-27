@@ -1,8 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { TaskItem, TaskStatus, Intent } from './IntentTypes.js';
-import { executeCommand } from '../agent/commands/index.js';
-import { containsCommand } from '../agent/commands/index.js';
+import { executeCommand, containsCommand, commandExists, parseCommandMessage } from '../agent/commands/index.js';
 
 const TASK_FILE = 'tasks.json';
 
@@ -167,6 +166,21 @@ export class TaskQueue {
                 continue;
             }
 
+            // Pre-validate: the step must resolve to a real, registered command
+            // with valid args. Unknown commands fail fast instead of silently
+            // "succeeding" (executeCommand returns error strings, not throws).
+            const preflight = parseCommandMessage(step);
+            if (typeof preflight === 'string') {
+                console.error(`[TaskQueue] Step ${i + 1}/${task.steps.length} invalid: ${preflight}`);
+                allStepsSucceeded = false;
+                task.error = `Step ${i + 1} invalid: ${preflight}`;
+                this.save();
+                if (sendFeedback) {
+                    this.agent?.history?.add('system', `[TaskQueue] Step ${i + 1}/${task.steps.length} invalid: ${step}`);
+                }
+                break;
+            }
+
             console.log(`[TaskQueue] Step ${i + 1}/${task.steps.length}: ${step}`);
 
             let stepSuccess = false;
@@ -179,6 +193,9 @@ export class TaskQueue {
                     if (task.status === TaskStatus.CANCELLED) break;
 
                     const result = await executeCommand(agent, step);
+                    // Note: successful commands often return result strings too,
+                    // so string-ness alone can't distinguish success here — that's
+                    // why unknown commands are rejected in the preflight above.
                     stepSuccess = result !== false && result !== null && result !== undefined;
 
                     if (sendFeedback && typeof result === 'string') {

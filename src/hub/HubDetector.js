@@ -6,14 +6,14 @@ const HUB_SIGNALS = {
   scoreboardHub: {
     weight: 50,
     check: (bot) => {
-      const title = bot.scoreboard?.title?.toLowerCase() || '';
+      const title = String(bot.scoreboard?.sidebar?.title || '').toLowerCase();
       return title.includes('hub') || title.includes('lobby');
     }
   },
   scoreboardServerSelector: {
     weight: 30,
     check: (bot) => {
-      const title = bot.scoreboard?.title?.toLowerCase() || '';
+      const title = String(bot.scoreboard?.sidebar?.title || '').toLowerCase();
       return title.includes('practice') || title.includes('selector') || title.includes('minigame');
     }
   },
@@ -59,6 +59,8 @@ const HUB_SIGNALS = {
     check: (bot) => {
       const entities = Object.values(bot.entities || {});
       return entities.some(e => {
+        // Real players never count as hub NPCs — only non-player entities may match keywords
+        if (e.type === 'player') return false;
         const name = (e.displayName || e.name || e.username || '').toLowerCase().replace(/§./g, '');
         const customName = e.metadata?.[2]?.toString?.().replace(/§./g, '').toLowerCase().trim();
         const matchText = (name || customName || '');
@@ -81,7 +83,7 @@ const HUB_SIGNALS = {
   tablistHub: {
     weight: 15,
     check: (bot) => {
-      const tl = bot.tabList;
+      const tl = bot.tablist;
       if (!tl) return false;
       const header = (tl.header?.text || '').toLowerCase();
       const footer = (tl.footer?.text || '').toLowerCase();

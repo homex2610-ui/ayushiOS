@@ -12,13 +12,13 @@ export const CHARACTER = {
 
 export const THRESHOLDS = {
   reflexPollMs: 100,
-  cognitiveTickMs: 1500,
+  cognitiveTickMs: 250,
   memorySaveIntervalMs: 120000,
 
   foodCritical: 8,
   foodLow: 16,
   foodComfortable: 20,
-  healthCritical: 6,
+  healthCritical: 8,
   healthLow: 10,
 
   threatScanRadius: 20,

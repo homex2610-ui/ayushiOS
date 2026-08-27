@@ -92,10 +92,12 @@ export class HealthMonitor {
 
     async _fallbackHealthCheck(instance, modelString) {
         try {
+            const url = instance.url;
+            // Cloud SDK providers have no HTTP endpoint to probe — assuming
+            // healthy beats pinging localhost and misflagging them.
+            if (!url) return true;
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000);
-            const api = selectAPI({ model: modelString });
-            const url = instance.url || 'http://127.0.0.1:11434';
             const res = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
             return res.ok;

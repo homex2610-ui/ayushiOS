@@ -7,6 +7,8 @@ import { HubStateMachine } from '../hub/HubStateMachine.js';
 import { HubNavigator } from '../hub/HubNavigator.js';
 import { computeHubScore } from '../hub/HubDetector.js';
 import { HubProfile } from '../hub/HubProfile.js';
+import { HubHotbarManager } from '../hub/HubHotbarManager.js';
+import { HubGUIClient } from '../hub/HubGUIClient.js';
 import { dumpAll } from '../debug/ServerInspectors.js';
 import CONNECTION_CONFIG, { ServerState, WorldType } from './ConnectionSettings.js';
 import { getServer } from '../mindcraft/mcserver.js';
@@ -25,6 +27,8 @@ export class ConnectionManager {
         this._onReadyCallback = null;
         this._onStateChange = null;
         this._readyResolvers = [];
+        this._readyCallbacks = [];
+        this._inspectHandler = null;
     }
 
     setBot(bot) {
@@ -37,7 +41,11 @@ export class ConnectionManager {
     }
 
     _registerInspectCommand() {
-        this.bot.on('chat', (username, message) => {
+        // Remove any previous handler first so re-registering (new bot/spawn) never stacks duplicates
+        if (this._inspectHandler) {
+            this.bot.removeListener('chat', this._inspectHandler);
+        }
+        this._inspectHandler = (username, message) => {
             if (!username || username === this.bot.username) return;
             if (message.trim().toLowerCase() !== '!inspect') return;
 
@@ -52,17 +60,18 @@ export class ConnectionManager {
                 const currentWindow = this.bot.currentWindow
                     ? `GUI: "${this.bot.currentWindow.title || 'Container'}"`
                     : 'No open GUI';
-                const heldSlot = 36 + (this.bot.quickbarSlot || 0);
+                const heldSlot = 36 + (this.bot.quickBarSlot || 0);
                 const heldItem = this.bot.inventory.slots[heldSlot];
                 const heldName = heldItem ? `${heldItem.displayName || heldItem.name} x${heldItem.count}` : 'Empty Hand';
-                const objCount = this.bot.scoreboard?.title ? 1 : 0;
+                const objCount = this.bot.scoreboard?.sidebar ? 1 : 0;
 
                 this.bot.chat(`[Inspector] Held: ${heldName} | ${currentWindow} | Scoreboards: ${objCount}`);
             } catch (err) {
                 console.error('[ChatInspector] Dump failed:', err);
                 this.bot.chat('[Inspector] Dump failed — check console');
             }
-        });
+        };
+        this.bot.on('chat', this._inspectHandler);
     }
 
     onReady(callback) {
@@ -77,9 +86,19 @@ export class ConnectionManager {
         const oldState = this.state;
         this.state = newState;
         console.log(`[Connection] State: ${oldState} -> ${newState}`);
+        // P1: normalized telemetry — every transition fans out to any
+        // listener (brain BeliefState, future dashboard). Single choke point.
+        this._listeners?.forEach(cb => { try { cb(newState, oldState); } catch (_) {} });
         if (this._onStateChange) {
             this._onStateChange(newState, oldState);
         }
+    }
+
+    /** P1: subscribe to normalized connection state changes. Returns unsubscribe. */
+    onConnectionChanged(callback) {
+        this._listeners = this._listeners || new Set();
+        this._listeners.add(callback);
+        return () => this._listeners.delete(callback);
     }
 
     async selectTarget(settings) {
@@ -133,16 +152,15 @@ export class ConnectionManager {
     }
 
     async waitForReady(timeoutMs = 60000) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             this._readyResolvers.push(resolve);
 
             const timeout = setTimeout(() => {
                 console.warn('[Connection] Ready timeout reached');
-                this._setState(ServerState.READY);
-                resolve({ success: true, timeout: true });
+                resolve({ success: false, timeout: true });
             }, timeoutMs);
 
-            this.onReady((result) => {
+            this._readyCallbacks.push((result) => {
                 clearTimeout(timeout);
                 resolve(result);
             });
@@ -243,8 +261,17 @@ export class ConnectionManager {
         this._hubStateMachine.onComplete(() => {});
         this._hubStateMachine.onFail(() => {});
         const navPromise = this._hubStateMachine.start(targetName);
+        // Swallow late rejections if the 60s timeout wins the race (prevents unhandledRejection)
+        navPromise.then(() => {}, () => {});
         const timeoutPromise = new Promise(r => setTimeout(() => r(false), 60000));
         const navigated = await Promise.race([navPromise, timeoutPromise]);
+
+        if (!navigated && this._hubStateMachine?.cancel) {
+            // The losing navPromise keeps running in the background unless we
+            // abort it — otherwise it keeps chatting /server, /hub, ... for
+            // minutes after we've declared the agent ready.
+            this._hubStateMachine.cancel('60s navigation race timed out');
+        }
 
         if (navigated) {
             console.log(`[Connection] Successfully joined ${targetName} server!`);
@@ -286,6 +313,8 @@ export class ConnectionManager {
             server: this._targetServer
         };
         if (this._onReadyCallback) this._onReadyCallback(result);
+        for (const callback of this._readyCallbacks) callback(result);
+        this._readyCallbacks = [];
         for (const resolve of this._readyResolvers) resolve(result);
         this._readyResolvers = [];
         return result;
