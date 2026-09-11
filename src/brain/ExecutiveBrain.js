@@ -11,6 +11,8 @@
 //   4. FOOD: sustainable food source
 //   5. SHELTER: bed, furnace, crafting table
 //   6. PROGRESSION: iron gear, diamond, exploration
+//
+// ENHANCED: Pro-player tier weighting, combat readiness detection
 // ─────────────────────────────────────────────────────────────
 
 import { THRESHOLDS } from './config.js';
@@ -44,6 +46,21 @@ function _foodCount(s) {
   const inv = s.resources?.inventory || [];
   return inv.filter(i => /apple|bread|cooked|potato|carrot|mutton|fish|beef|chicken|berry|melon|stew|soup|honey|rotten_flesh/.test(i.name))
     .reduce((sum, i) => sum + (i.count || 1), 0);
+}
+
+// ENHANCED: Calculate combat readiness based on gear and health
+function _calculateCombatReadiness(s) {
+  const inv = s.resources?.inventory || [];
+  const hasWeapon = inv.some(i => /_sword|_axe/.test(i.name));
+  const hasArmor = inv.filter(i => /_helmet|_chestplate|_leggings|_boots/.test(i.name)).length;
+  const health = s.vitality?.health ?? 20;
+  
+  let readiness = 0;
+  if (hasWeapon) readiness += 0.3;
+  if (hasArmor >= 2) readiness += 0.4;
+  if (hasArmor === 4) readiness += 0.2;
+  readiness *= (health / 20); // scale by health
+  return Math.min(1, readiness);
 }
 
 const NEEDS = [
@@ -108,22 +125,44 @@ const NEEDS = [
     goal: () => ({ name: 'find_shelter', task: 'build_base', params: {} })
   },
 
-  // ─── TIER 4: TOOLS (weapon, pickaxe) ───────────────────────
+  // ─── TIER 4: COMBAT GEAR (weapon first, then armor, then pickaxe) ───
   {
     name: 'get_weapon',
     score: (s) => {
       const hasWeapon = _hasWeapon(s);
       const threats = s.threats || [];
       const nighttime = _isNighttime(s);
-      // No weapon + threats nearby = high urgency
-      if (!hasWeapon && threats.length > 0) return 0.9;
+      // No weapon + threats nearby = HIGHEST priority (pro player rule)
+      if (!hasWeapon && threats.length > 0) return 0.95;
       // No weapon + nighttime = medium-high urgency
-      if (!hasWeapon && nighttime) return 0.7;
+      if (!hasWeapon && nighttime) return 0.75;
       // No weapon + always good to have
-      if (!hasWeapon) return 0.4;
+      if (!hasWeapon) return 0.45;
       return 0;
     },
     goal: () => ({ name: 'get_weapon', task: 'advance_capability', params: {} })
+  },
+  {
+    name: 'get_armor',
+    score: (s) => {
+      const inv = s.resources?.inventory || [];
+      const armorCount = inv.filter(i => /_helmet|_chestplate|_leggings|_boots/.test(i.name)).length;
+      const threats = s.threats || [];
+      const combatReady = _calculateCombatReadiness(s);
+      
+      // Pro player rule: armor before advanced tools when threats exist
+      if (threats.length > 0 && armorCount < 4) {
+        return Math.min(0.8, 0.5 + (4 - armorCount) * 0.1);
+      }
+      // Low health + low armor = increase priority
+      if ((s.vitality?.health ?? 20) < 12 && armorCount < 3) {
+        return 0.6;
+      }
+      // Peaceful: lower priority
+      if (threats.length === 0 && armorCount < 4) return 0.2;
+      return 0;
+    },
+    goal: () => ({ name: 'get_armor', task: 'advance_capability', params: {} })
   },
   {
     name: 'get_tools',
@@ -292,8 +331,6 @@ export class ExecutiveBrain {
     this._lastPlanContext = null;
     this._lastDecisions = [];
     this._decisionCount = {};
-    // Quantum-cognition arbiter: amplitudes + Born rule + interference
-    // replace greedy argmax for need selection (see QuantumMind.js).
     this.quantumMind = new QuantumMind(NEEDS.map(n => n.name));
 
     this.bus?.on('task_started', ({ taskName, steps, context }) => {
@@ -305,7 +342,6 @@ export class ExecutiveBrain {
       }
       this.lastFailure = { taskName, error, time: Date.now() };
       this.memory?.recordFailure?.(taskName, error);
-      // Destructive interference — punished states fall out of superposition.
       this.quantumMind?.observe(taskName, -1);
     });
     this.bus?.on('task_interrupted', ({ taskName }) => {
@@ -317,7 +353,6 @@ export class ExecutiveBrain {
     this.bus?.on('task_completed', ({ taskName }) => {
           this.lastInterruptedGoal = null;
           this.lastFailure = null;
-          // Constructive interference — rewarded states gain amplitude.
           this.quantumMind?.observe(taskName, +1);
           if (taskName === 'chat_greet') {
             this._goalTimestamps.chat_greet = Date.now();
@@ -408,8 +443,6 @@ export class ExecutiveBrain {
 
   _planGoal(goal, state) {
     // P0-3 HTN-FIRST: src/domain/tasks.js is the canonical plan expansion.
-    // The hand-written switch below survives only as fallback for goals not
-    // yet ported into the domain (chat_greet, resume_task, idle…).
     const taskName = goal.task || goal.name;
     if (this.htnPlanner && this._htnTasks?.has(taskName)) {
       try {
@@ -422,8 +455,6 @@ export class ExecutiveBrain {
           this.lastPlanSource = 'htn';
           return steps;
         }
-        // Empty plan = preconditions unmet in a way the domain can't expand;
-        // fall through to legacy for resilience.
       } catch (e) {
         console.warn(`[ExecutiveBrain] HTN plan failed for ${taskName}: ${e.message} — legacy fallback`);
       }
@@ -435,6 +466,7 @@ export class ExecutiveBrain {
       case 'eat': return this._planEat(state);
       case 'find_shelter': return this._planFindShelter(state);
       case 'get_weapon': return this._planGetWeapon(state);
+      case 'get_armor': return this._planGetArmor(state);
       case 'get_tools': return this._planGetTools(state);
       case 'craft_gear': return this._planCraftGear(state);
       case 'advance_capability': return this._planAdvanceCapability(state);
@@ -463,15 +495,12 @@ export class ExecutiveBrain {
   }
 
   _planFindShelter(state) {
-    // If we already have a base, go there
     if (state.beliefs?.nearestSafeBase) {
       return [
         { skill: 'move_to', params: { x: state.beliefs.nearestSafeBase.position.x, y: state.beliefs.nearestSafeBase.position.y, z: state.beliefs.nearestSafeBase.position.z, range: 4 } },
         { skill: 'wait', params: { ms: 3000 } }
       ];
     }
-    // No base yet — build emergency shelter
-    // Collect wood, craft planks, make bed, dig into hillside
     return [
       { skill: 'collect', params: { item: 'log', count: 8 } },
       { skill: 'craft_planks', params: { count: 16 } },
@@ -486,9 +515,7 @@ export class ExecutiveBrain {
     const hasPickaxe = inv.some(i => /_pickaxe/.test(i.name));
     const hasSword = inv.some(i => /_sword/.test(i.name));
     const hasAxe = inv.some(i => /_axe/.test(i.name));
-    const hasCraftingTable = !!state.environment?.nearestWorkstation;
 
-    // If we have no pickaxe, get wood tools first
     if (!hasPickaxe) {
       return [
         { skill: 'collect', params: { item: 'log', count: 6 } },
@@ -500,7 +527,6 @@ export class ExecutiveBrain {
         { skill: 'equip', params: { item: 'wooden_sword', slot: 'hand' } }
       ];
     }
-    // Has pickaxe but no sword — craft stone sword (better than wood)
     if (!hasSword) {
       return [
         { skill: 'collect', params: { item: 'cobblestone', count: 8 } },
@@ -508,11 +534,26 @@ export class ExecutiveBrain {
         { skill: 'equip', params: { item: 'stone_sword', slot: 'hand' } }
       ];
     }
-    // Has sword but no axe — craft stone axe
     if (!hasAxe) {
       return [
         { skill: 'collect', params: { item: 'cobblestone', count: 6 } },
         { skill: 'craft', params: { item: 'stone_axe', count: 1 } }
+      ];
+    }
+    return [];
+  }
+
+  _planGetArmor(state) {
+    const inv = state.resources?.inventory || [];
+    const armorCount = inv.filter(i => /_helmet|_chestplate|_leggings|_boots/.test(i.name)).length;
+    
+    if (armorCount < 4) {
+      return [
+        { skill: 'collect', params: { item: 'cobblestone', count: 24 } },
+        { skill: 'craft', params: { item: 'stone_helmet', count: 1 } },
+        { skill: 'craft', params: { item: 'stone_chestplate', count: 1 } },
+        { skill: 'craft', params: { item: 'stone_leggings', count: 1 } },
+        { skill: 'craft', params: { item: 'stone_boots', count: 1 } },
       ];
     }
     return [];
@@ -533,7 +574,6 @@ export class ExecutiveBrain {
         { skill: 'equip', params: { item: 'wooden_pickaxe', slot: 'hand' } }
       ];
     }
-    // Upgrade to stone if we have cobblestone
     const hasStone = inv.some(i => i.name === 'cobblestone');
     if (hasStone && !inv.some(i => /stone_pickaxe/.test(i.name))) {
       return [
@@ -559,7 +599,6 @@ export class ExecutiveBrain {
         { skill: 'eat', params: { minFoodLevel: THRESHOLDS.foodComfortable } }
       ];
     }
-    // Hunt animals first (more reliable than unknown crops)
     return [
       { skill: 'combat', params: { entityType: 'animal', range: 20, count: 2, stopOnHealth: 3 } },
       { skill: 'eat', params: { minFoodLevel: THRESHOLDS.foodComfortable } }
@@ -594,8 +633,6 @@ export class ExecutiveBrain {
         { skill: 'wait', params: { ms: 3000 } }
       ];
     }
-    // Wood-generic plan: collect logs, convert to planks (species-agnostic),
-    // then table + bed. Old version hard-coded oak and failed in spruce forests.
     const collectCount = state.planning.hasCraftingTable || state.planning.hasFurnace ? 8 : 12;
     return [
       { skill: 'collect', params: { item: 'log', count: Math.ceil(collectCount / 4) } },
@@ -671,20 +708,14 @@ export class ExecutiveBrain {
     };
 
     let scored = NEEDS.map(n => {
-      // P1: learning feedback loop CLOSED — SkillRepository statistics now
-      // modulate goal scoring. Goals with proven success get a boost; goals
-      // with a history of failure get damped (bounded, so novelty still wins).
       let advisorBoost = 0;
       try {
         const hints = this.getPlannerHints?.(n.name) || {};
         const sr = Number.isFinite(hints.successRate) ? hints.successRate : null;
         if (sr !== null && (hints.bestStrategy || hints.serverSpecificSkill)) {
-          // successRate 0..1 → boost −0.08..+0.10; only when we actually
-          // have data for this goal (bestStrategy non-null = attempts exist).
           advisorBoost = Math.max(-0.08, Math.min(0.10, (sr - 0.5) * 0.2));
         }
       } catch (_) {}
-      // Action-outcome memory: boost/damp based on past results in similar context
       let actionBoost = 0;
       try {
         const am = this.getActionMemory?.();
@@ -708,9 +739,6 @@ export class ExecutiveBrain {
     }).sort((a, b) => b.score - a.score);
 
     // ── Neural cortex steer: predictions modulate need scores ──
-    // danger > 0.6  → boost survival goals, damp progression
-    // hungerRisk > 0.6 → boost eat/farm_food
-    // readiness > 0.7 → boost craft_gear/advance (good state to progress)
     const nn = snapshot._nnPredictions || this._nnPredictions;
     if (nn) {
       const SURVIVAL_TASKS = ['avoid_hazard', 'seek_safety', 'eat'];
@@ -745,7 +773,7 @@ export class ExecutiveBrain {
       if (nonCooldown.length > 0) scored = nonCooldown;
     }
 
-    // Repetition guard: if same need wins 4+ times in a row, add extra penalty
+    // Repetition guard
     const REPETITION_PENALTY_THRESHOLD = 4;
     const REPETITION_PENALTY = 0.3;
     for (const s of scored) {
@@ -756,16 +784,11 @@ export class ExecutiveBrain {
     }
     scored.sort((a, b) => b.score - a.score);
 
-    // Quantum-cognition arbitration: Born-rule sampling over amplitudes
-    // (interference + annealing + tunneling) instead of greedy argmax.
-    // Utility scores still set the target magnitudes — the wave function
-    // only decides HOW we choose among them.
+    // Quantum-cognition arbitration
     const pick = this.quantumMind.arbitrate(scored, this.lastSelectedNeed);
     const top = scored.find(s => s.need === pick.need) || scored[0];
     this.bus?.emit('quantum_decision', { via: pick.via, need: top.need, ...this.quantumMind.describe() });
 
-    // P1: DecisionTrace Planning stage — the full WHY-THIS / WHY-NOT ranking
-    // (this was previously never recorded; the dashboard needs it too).
     try {
       const tPlan0 = Date.now();
       this.trace?.recordPlanning?.(
